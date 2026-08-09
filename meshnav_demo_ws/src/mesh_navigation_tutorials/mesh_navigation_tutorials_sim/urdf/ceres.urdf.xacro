@@ -28,9 +28,9 @@
   
   <xacro:property name="imu_stdev" value="0.0001" />
   
-  <xacro:property name="body_height" value="0.15"/>
-  <xacro:property name="body_length" value="0.38"/>
-  <xacro:property name="body_width" value="0.32"/>
+  <xacro:property name="body_height" value="0.1"/>
+  <xacro:property name="body_length" value="0.32"/>
+  <xacro:property name="body_width" value="0.26"/>
   
   <xacro:property name="axis_front" value="0.14"/>
   <xacro:property name="axis_back" value="-0.14"/>

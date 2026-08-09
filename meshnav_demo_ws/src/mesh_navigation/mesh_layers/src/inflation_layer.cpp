@@ -549,14 +549,17 @@ mesh_map::Vector InflationLayer::vectorAt(const lvr2::VertexHandle& vH)
   }
 
   if (distance > config_.inflation_radius)
+  {
+    return mesh_map::Vector();
+  }
 
-    // Inflation radius
-    if (distance > config_.inscribed_radius)
-    {
-      float alpha =
-          (sqrt(distance) - config_.inscribed_radius) / (config_.inflation_radius - config_.inscribed_radius) * M_PI;
-      return vec * config_.inscribed_value * (cos(alpha) + 1) / 2.0;
-    }
+  // Inflation radius
+  if (distance > config_.inscribed_radius)
+  {
+    float alpha =
+        (sqrt(distance) - config_.inscribed_radius) / (config_.inflation_radius - config_.inscribed_radius) * M_PI;
+    return vec * config_.inscribed_value * (cos(alpha) + 1) / 2.0;
+  }
 
   // Inscribed radius
   if (distance > 0)

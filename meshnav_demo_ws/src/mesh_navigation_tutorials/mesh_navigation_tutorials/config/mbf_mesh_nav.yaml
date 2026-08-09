@@ -57,6 +57,7 @@ move_base_flex:
       height_diff:
         type: 'mesh_layers/HeightDiffLayer'
         combination_weight: 1.0
+        radius : 0.2
         threshold: 0.2
 
       border:
@@ -119,7 +120,7 @@ move_base_flex:
       # This edge_weight is then passed to the global planner to search for 
       # the best path
       # Note: Set this to 0.0 if you need the shortest path
-      edge_cost_factor: 5.0
+      edge_cost_factor: 8.0
 
       # debug function: enable this, for publishing text markers with edge costs
       publish_edge_weights_text: false
