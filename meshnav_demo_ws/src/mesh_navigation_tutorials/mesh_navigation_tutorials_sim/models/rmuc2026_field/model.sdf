@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="rmuc2026_field">
+    <static>true</static>
+    <link name="map_link">
+      <collision name="collision">
+        <geometry><mesh><uri>meshes/rmuc2026_field_collision.stl</uri><scale>1 1 1</scale></mesh></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><mesh><uri>meshes/rmuc2026_field_visual.stl</uri><scale>1 1 1</scale></mesh></geometry>
+        <!-- STL does not contain CAD colour/material data, so assign an
+             explicit low-specular material instead of Gazebo's white default. -->
+        <cast_shadows>true</cast_shadows>
+        <material>
+          <ambient>0.08 0.12 0.18 1</ambient>
+          <diffuse>0.28 0.46 0.68 1</diffuse>
+          <specular>0.03 0.03 0.03 1</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

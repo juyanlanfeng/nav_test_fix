@@ -1,0 +1,41 @@
+# ---- ROS 构建产物 ----
+build/
+install/
+log/
+devel/
+CMakeFiles/
+__pycache__/
+*.pyc
+
+# ---- 运行时/转换产物 ----
+*.h5
+*.h5.*
+*.pcd
+*.stp
+*.step
+*.step.*
+field/converted_rmuc2026/
+
+# ---- Python 虚拟环境 ----
+.step_convert_venv/
+.venv/
+venv/
+
+# ---- 大文件(超过 GitHub 100MB 单文件限制) ----
+**/rmuc2026_field_visual.stl
+
+# ---- 第三方教程场景的 LFS 数据(本地对象已丢失,仅剩指针) ----
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres/maps/*.ply
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto/maps/*.ply
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/worlds/*.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/worlds/*.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/models/*/model.config
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/models/*/model.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/models/*/meshes/*
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/models/*/model.config
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/models/*/model.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/models/*/meshes/*
+
+# ---- 其他 ----
+field/get-pip.py
+.claude/
