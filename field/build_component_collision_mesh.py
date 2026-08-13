@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 from pathlib import Path
 import time
 
@@ -24,6 +23,12 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse import csgraph
 import trimesh
+
+from conversion_metadata import (
+    load_json_object,
+    merge_hashed_object,
+    write_json_object,
+)
 
 
 def log(message: str) -> None:
@@ -233,11 +238,12 @@ def main() -> None:
     )
 
     if args.report:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        report = merge_hashed_object(
+            load_json_object(args.report),
+            report,
+            ("output_sha256", "sha256"),
         )
+        write_json_object(args.report, report)
         log(f"Wrote report {args.report}")
 
 

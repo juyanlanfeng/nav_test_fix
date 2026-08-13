@@ -3,3 +3,4 @@ bool recompute_layers
 bool success
 string message
 builtin_interfaces/Time snapshot_stamp
+uint64 state_revision

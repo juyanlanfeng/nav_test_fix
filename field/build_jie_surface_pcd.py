@@ -29,6 +29,12 @@ import trimesh
 from trimesh.remesh import subdivide_to_size
 
 from build_component_collision_mesh import load_single_mesh
+from conversion_metadata import (
+    load_json_object,
+    merge_hashed_section,
+    relative_or_absolute,
+    write_json_object,
+)
 from step_to_nav_maps import write_binary_pcd
 
 
@@ -129,6 +135,44 @@ def rasterize_surface_voxels(
     return keys
 
 
+def update_conversion_metadata(args: argparse.Namespace, report: dict) -> bool:
+    """Record the canonical JIE artifact when it lives in a conversion tree."""
+    if args.output.parent.name != "jie_nav":
+        return False
+    conversion_base = args.output.parent.parent
+    metadata_path = conversion_base / "conversion_metadata.json"
+    if not metadata_path.is_file():
+        return False
+
+    generated = {
+        "source_mesh": relative_or_absolute(args.source, conversion_base),
+        "canonical_file": relative_or_absolute(args.output, conversion_base),
+        "sha256": report["output_sha256"],
+        "points": report["output_points"],
+        "file_size_bytes": report["output_file_size_bytes"],
+        "surface_voxel_m": report["surface_voxel_m"],
+        "subdivision_edge_factor": report["subdivision_edge_factor"],
+        "maximum_subdivided_edge_m": report["maximum_subdivided_edge_m"],
+        "z_band_m": report["z_band_m"],
+        "coordinate_policy": report["output_coordinate_policy"],
+        "generator": "field/build_jie_surface_pcd.py",
+        "occupancy_semantics": (
+            "deterministic collision-surface obstacle samples; never the "
+            "Mesh navigation PLY"
+        ),
+    }
+    if args.report is not None:
+        generated["generation_report"] = relative_or_absolute(
+            args.report, conversion_base
+        )
+
+    metadata = load_json_object(metadata_path)
+    merge_hashed_section(metadata, "jie_nav_surface_pcd", generated, "sha256")
+    write_json_object(metadata_path, metadata)
+    log(f"Updated conversion metadata: {metadata_path}")
+    return True
+
+
 def build(args: argparse.Namespace) -> dict:
     started = time.monotonic()
     log(f"Loading collision surface: {args.source}")
@@ -189,6 +233,7 @@ def build(args: argparse.Namespace) -> dict:
             encoding="utf-8",
         )
         log(f"Wrote report: {args.report}")
+    update_conversion_metadata(args, report)
     return report
 
 

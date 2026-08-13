@@ -1,0 +1,8 @@
+octomap_msgs/Octomap octomap
+visualization_msgs/Marker external_preblocked
+rcl_interfaces/Parameter[] planner_parameters
+bool clear_navigation
+---
+bool success
+string message
+builtin_interfaces/Time snapshot_stamp

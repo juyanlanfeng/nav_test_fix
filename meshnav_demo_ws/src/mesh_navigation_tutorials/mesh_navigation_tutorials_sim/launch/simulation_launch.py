@@ -94,6 +94,30 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument(
+            "robot_body_height",
+            description="Body height used by both visual and collision geometry",
+            default_value=PythonExpression(
+                ['"0.10" if "', LaunchConfiguration("world_name"),
+                 '" == "rmuc2026_field" else "0.15"']
+            ),
+        ),
+        DeclareLaunchArgument(
+            "robot_body_length",
+            description="Body length used by both visual and collision geometry",
+            default_value=PythonExpression(
+                ['"0.32" if "', LaunchConfiguration("world_name"),
+                 '" == "rmuc2026_field" else "0.38"']
+            ),
+        ),
+        DeclareLaunchArgument(
+            "robot_body_width",
+            description="Body width used by both visual and collision geometry",
+            default_value=PythonExpression(
+                ['"0.26" if "', LaunchConfiguration("world_name"),
+                 '" == "rmuc2026_field" else "0.32"']
+            ),
+        ),
+        DeclareLaunchArgument(
             "laser2d_mount_z",
             description="2-D lidar height relative to base_link",
             default_value=PythonExpression(
@@ -151,6 +175,9 @@ def generate_launch_description():
             "laser3d_collision": LaunchConfiguration("laser3d_collision"),
             "slope_aware_drive": LaunchConfiguration("slope_aware_drive"),
             "robot_wheel_radius": LaunchConfiguration("robot_wheel_radius"),
+            "robot_body_height": LaunchConfiguration("robot_body_height"),
+            "robot_body_length": LaunchConfiguration("robot_body_length"),
+            "robot_body_width": LaunchConfiguration("robot_body_width"),
             "laser2d_mount_z": LaunchConfiguration("laser2d_mount_z"),
             "laser3d_mount_z": LaunchConfiguration("laser3d_mount_z"),
             "spawn_x": LaunchConfiguration("spawn_x"),

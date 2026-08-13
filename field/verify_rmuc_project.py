@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -61,6 +62,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def cache_is_fresh(cache: Path, dependencies: list[Path]) -> bool:
+    """Return whether a non-empty cache is at least as new as every input."""
+    if not cache.is_file() or cache.stat().st_size == 0:
+        return False
+    cache_mtime = cache.stat().st_mtime_ns
+    return all(
+        dependency.is_file() and cache_mtime >= dependency.stat().st_mtime_ns
+        for dependency in dependencies
+    )
+
+
 def mesh_header(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     with path.open("rb") as stream:
@@ -111,8 +123,52 @@ def pcd_xyz_are_cell_centres(path: Path, pitch: float) -> bool:
     return True
 
 
+def launch_argument_block(source: str, argument_name: str) -> str:
+    """Return one DeclareLaunchArgument block for focused value checks."""
+    match = re.search(
+        rf"DeclareLaunchArgument\(\s*[\"']{re.escape(argument_name)}[\"']",
+        source,
+    )
+    if match is None:
+        return ""
+    next_match = re.search(r"DeclareLaunchArgument\(", source[match.end() :])
+    if next_match is None:
+        return source[match.start() :]
+    return source[match.start() : match.end() + next_match.start()]
+
+
+def launch_mapping_block(source: str, parameter_name: str) -> str:
+    """Return the nearby mapping expression for one launch parameter."""
+    marker = f'"{parameter_name}":'
+    start = source.find(marker)
+    if start < 0:
+        return ""
+    end = source.find("\n            ),", start)
+    if end < 0:
+        return source[start : start + 320]
+    return source[start : end + len("\n            ),")]
+
+
 def main() -> int:
     audit = Audit()
+    usage_doc = ROOT / "doc" / "CONVERSION_AND_USAGE.md"
+    root_readme = ROOT / "README.md"
+    field_readme = ROOT / "field" / "README.md"
+    audit.check(usage_doc.is_file(), "主使用文档存在", str(usage_doc.relative_to(ROOT)))
+    audit.check(root_readme.is_file(), "项目 README 存在")
+    audit.check(field_readme.is_file(), "field README 存在")
+    if root_readme.is_file():
+        audit.check(
+            "(doc/CONVERSION_AND_USAGE.md)" in root_readme.read_text(encoding="utf-8"),
+            "项目 README 指向移动后的主文档",
+        )
+    if field_readme.is_file():
+        audit.check(
+            "(../doc/CONVERSION_AND_USAGE.md)"
+            in field_readme.read_text(encoding="utf-8"),
+            "field README 指向移动后的主文档",
+        )
+
     field_model = FIELD / "gazebo" / "models" / "rmuc2026_field"
     field_meshes = field_model / "meshes"
     ros_model = ROS_SIM / "models" / "rmuc2026_field"
@@ -263,22 +319,48 @@ def main() -> int:
         "四条 RMUC 下层通道回归通过",
     )
 
-    collision_report = json.loads(
-        (
-            FIELD
-            / "gazebo"
-            / "collision_candidates"
-            / "rmuc2026_field_collision_component_budget_500k.json"
-        ).read_text(encoding="utf-8")
+    collision_report_path = (
+        FIELD
+        / "gazebo"
+        / "collision_candidates"
+        / "rmuc2026_field_collision_component_budget_500k.json"
     )
-    audit.check(
-        collision_report.get("candidate_faces") == EXPECTED["collision_faces"],
-        "碰撞网格面数",
-    )
-    audit.check(
-        "min_z <= 0.35 m" in collision_report.get("method", ""),
-        "碰撞网格强制保留低层组件",
-    )
+    audit.check(collision_report_path.is_file(), "碰撞网格生成报告存在")
+    if collision_report_path.is_file():
+        collision_report = json.loads(
+            collision_report_path.read_text(encoding="utf-8")
+        )
+        # The historical hand-audited report used candidate_*/sha256 while the
+        # reproducible builder uses output_*.  Both describe the same artifact.
+        collision_report_faces = collision_report.get(
+            "output_faces", collision_report.get("candidate_faces")
+        )
+        collision_report_hash = collision_report.get(
+            "output_sha256", collision_report.get("sha256")
+        )
+        collision_source_hash = collision_report.get("source_sha256")
+        if collision_source_hash is None:
+            collision_source_hash = (
+                collision_report.get("comparison", {})
+                .get("visual_reference", {})
+                .get("sha256")
+            )
+        audit.check(
+            collision_report_faces == EXPECTED["collision_faces"],
+            "碰撞网格面数",
+        )
+        audit.check(
+            collision_report_hash == hashes["collision"],
+            "碰撞报告输出哈希对应 canonical collision STL",
+        )
+        audit.check(
+            collision_source_hash == hashes["visual"],
+            "碰撞报告输入哈希对应 canonical visual STL",
+        )
+        audit.check(
+            "min_z <= 0.35 m" in collision_report.get("method", ""),
+            "碰撞网格强制保留低层组件",
+        )
 
     metadata = json.loads(
         (FIELD / "conversion_metadata.json").read_text(encoding="utf-8")
@@ -303,6 +385,24 @@ def main() -> int:
         == "deterministic collision-surface obstacle samples; never the Mesh navigation PLY",
         "metadata 区分 JIE 占据 PCD 与 Mesh 可通行 PLY",
     )
+    physics_validation = metadata.get("gazebo_collision_postprocess", {}).get(
+        "gazebo_physics_validation", []
+    )
+    if physics_validation:
+        audit.check(
+            any(
+                "about 1.123 m" in item and "x=-0.32665055" in item
+                for item in physics_validation
+            )
+            and any(
+                "MoveBase succeeded with outcome=0" in item and "0.17776 m" in item
+                for item in physics_validation
+            )
+            and not any("0.524 m" in item for item in physics_validation),
+            "metadata 使用当前 Gazebo 直驱与 MoveBase 验证结果",
+        )
+    else:
+        print("INFO  metadata 未记录可选的 Gazebo 人工运行验证；生成资产审计继续")
 
     sdf_root = ET.parse(field_model / "model.sdf").getroot()
     visual_uris = [node.text for node in sdf_root.findall(".//visual//uri")]
@@ -347,14 +447,49 @@ def main() -> int:
     wheel_xacro = (ROS_SIM / "urdf" / "wheel.urdf.xacro").read_text(
         encoding="utf-8"
     )
-    nav_launch = (
+    nav_launch_path = (
         ROS_SIM.parent
         / "mesh_navigation_tutorials"
         / "launch"
         / "mesh_navigation_tutorials_launch.py"
-    ).read_text(encoding="utf-8")
+    )
+    nav_config_path = (
+        ROS_SIM.parent
+        / "mesh_navigation_tutorials"
+        / "config"
+        / "mbf_mesh_nav.yaml"
+    )
+    nav_launch = nav_launch_path.read_text(encoding="utf-8")
+    nav_config = nav_config_path.read_text(encoding="utf-8")
     bridge_config = (ROS_SIM / "config" / "ros_gazebo_bridge.yaml").read_text(
         encoding="utf-8"
+    )
+    body_height_argument = launch_argument_block(sim_launch, "robot_body_height")
+    body_length_argument = launch_argument_block(sim_launch, "robot_body_length")
+    body_width_argument = launch_argument_block(sim_launch, "robot_body_width")
+    legacy_body_geometry = (
+        '<xacro:arg name="body_height" default="0.15"/>' in robot_xacro
+        and '<xacro:arg name="body_length" default="0.38"/>' in robot_xacro
+        and '<xacro:arg name="body_width" default="0.32"/>' in robot_xacro
+        and '<xacro:property name="body_height" value="$(arg body_height)"/>'
+        in robot_xacro
+        and '<xacro:property name="body_length" value="$(arg body_length)"/>'
+        in robot_xacro
+        and '<xacro:property name="body_width" value="$(arg body_width)"/>'
+        in robot_xacro
+        and '"0.10" if "' in body_height_argument
+        and 'else "0.15"' in body_height_argument
+        and '"0.32" if "' in body_length_argument
+        and 'else "0.38"' in body_length_argument
+        and '"0.26" if "' in body_width_argument
+        and 'else "0.32"' in body_width_argument
+        and "body_height:=" in base_launch
+        and "body_length:=" in base_launch
+        and "body_width:=" in base_launch
+    )
+    audit.check(
+        legacy_body_geometry,
+        "RMUC 低车体与 legacy 原尺寸通过 launch/xacro profile 隔离",
     )
     audit.check(
         '"True" if "' in sim_launch
@@ -376,11 +511,37 @@ def main() -> int:
         and "wheel_radius / 0.125" in wheel_xacro,
         "RMUC 低轮廓车型与旧 world 尺寸隔离",
     )
+    static_inscribed_block = launch_mapping_block(
+        nav_launch, "static_inscribed_radius"
+    )
+    obstacle_inscribed_block = launch_mapping_block(
+        nav_launch, "obstacle_inscribed_radius"
+    )
+    obstacle_height_block = launch_mapping_block(nav_launch, "obstacle_robot_height")
     audit.check(
-        '"0.225" if "' in nav_launch
-        and '"0.28" if "' in nav_launch
+        '"0.28" if "' in static_inscribed_block
+        and '"rmuc2026_field"' in static_inscribed_block
+        and '"0.28" if "' in obstacle_inscribed_block
+        and '"rmuc2026_field"' in obstacle_inscribed_block
+        and '"0.225" if "' in obstacle_height_block
+        and '"rmuc2026_field"' in obstacle_height_block
         and '"height_diff_threshold": "0.2"' in nav_launch,
-        "MeshNav RMUC 高度与水平包络参数一致",
+        "MeshNav RMUC 静态/动态内切半径均为 0.28 m，机器人高度为 0.225 m",
+    )
+    audit.check(
+        re.search(
+            r"(?ms)^\s+height_diff:\s*$.*?^\s+radius\s*:\s*0\.2\s*$"
+            r".*?^\s+threshold:\s*0\.2\s*$",
+            nav_config,
+        )
+        is not None
+        and re.search(
+            r"^\s+edge_cost_factor:\s*8(?:\.0)?\s*$",
+            nav_config,
+            re.MULTILINE,
+        )
+        is not None,
+        "MeshNav 用户调参保持 height_diff radius/threshold=0.2、edge_cost_factor=8",
     )
     audit.check(
         '<xacro:if value="$(arg slope_aware_drive)">' in robot_xacro
@@ -407,6 +568,45 @@ def main() -> int:
     audit.check(
         "goal_pose_topic, rclcpp::QoS(1).reliable()" in jie_path_source,
         "JIE /goal_pose 使用 RViz 兼容的 volatile durability",
+    )
+
+    pcd_converter_source = (
+        ROOT / "jie_3d_nav" / "jie_octomap" / "src" / "pcd_to_octomap_node.cpp"
+    ).read_text(encoding="utf-8")
+    audit.check(
+        'declare_parameter<double>("republish_period_s", 0.0);'
+        in pcd_converter_source
+        and "if (republish_period_s > 0.0)" in pcd_converter_source,
+        "PCD converter 默认不周期重发 OctoMap（republish_period_s=0）",
+    )
+
+    jie_import_launch = (
+        ROOT / "jie_3d_nav" / "jie_octomap" / "launch" / "import_pcd_map.launch.py"
+    ).read_text(encoding="utf-8")
+    resolution_argument = launch_argument_block(jie_import_launch, "resolution")
+    radius_argument = launch_argument_block(jie_import_launch, "robot_radius_xy")
+    height_argument = launch_argument_block(jie_import_launch, "robot_height")
+    gui_argument = launch_argument_block(jie_import_launch, "start_import_gui")
+    audit.check(
+        "'0.05' if '" in resolution_argument
+        and "rmuc2026_profile" in resolution_argument
+        and "'0.28' if '" in radius_argument
+        and "rmuc2026_profile" in radius_argument
+        and "'0.225' if '" in height_argument
+        and "rmuc2026_profile" in height_argument
+        and '"resolution": ParameterValue(resolution, value_type=float)'
+        in jie_import_launch
+        and '"robot_radius_xy": ParameterValue(robot_radius_xy, value_type=float)'
+        in jie_import_launch
+        and '"robot_height": ParameterValue(robot_height, value_type=float)'
+        in jie_import_launch,
+        "JIE RMUC profile 显式传入 0.05/0.28/0.225",
+    )
+    audit.check(
+        'default_value="true"' in gui_argument
+        and 'choices=["true", "false"]' in gui_argument
+        and "condition=IfCondition(start_import_gui)" in jie_import_launch,
+        "JIE PCD 导入 GUI 可由 start_import_gui 显式开关",
     )
 
     tutorial_package = ET.parse(
@@ -443,8 +643,8 @@ def main() -> int:
     h5 = MESH_WS / "rmuc2026_field.h5"
     if h5.is_file():
         audit.check(
-            h5.stat().st_size > 0 and h5.stat().st_mtime >= ply.stat().st_mtime,
-            "MeshNav H5 缓存与新 PLY 同步",
+            cache_is_fresh(h5, [ply, nav_launch_path, nav_config_path]),
+            "MeshNav H5 缓存不早于 PLY、顶层 launch 与 mbf_mesh_nav.yaml",
         )
     else:
         audit.check(True, "旧 H5 已失效；首次启动将按新 PLY 重建")

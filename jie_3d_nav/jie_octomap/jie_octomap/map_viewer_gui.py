@@ -12,8 +12,13 @@ import numpy as np
 import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from jie_map_msgs.srv import LoadNavigationMapPackage, SaveNavigationMapPackage
 from geometry_msgs.msg import Point, PointStamped, PoseStamped, PoseWithCovarianceStamped
+from jie_map_msgs.srv import LoadNavigationMapPackage, SaveNavigationMapPackage
+from jie_octomap.map_package_schema import (
+    MAP_PACKAGE_LOAD_TIMEOUT_SEC,
+    MAP_PACKAGE_SAVE_TIMEOUT_SEC,
+    external_preblocked_layer_from_archive,
+)
 from nav_msgs.msg import Path as PathMsg
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
@@ -54,7 +59,12 @@ class SaveMapClient(Node):
             SaveNavigationMapPackage, "/map_package_manager/save_package"
         )
 
-    def save_package(self, package_path: str, overwrite: bool, timeout_sec: float = 10.0):
+    def save_package(
+        self,
+        package_path: str,
+        overwrite: bool,
+        timeout_sec: float = MAP_PACKAGE_SAVE_TIMEOUT_SEC,
+    ):
         if not self.client.wait_for_service(timeout_sec=2.0):
             return False, "保存服务 /map_package_manager/save_package 不可用。"
 
@@ -84,9 +94,17 @@ class LoadMapClient(Node):
             LoadNavigationMapPackage, "/map_package_manager/load_package"
         )
 
-    def load_package(self, package_path: str, timeout_sec: float = 10.0):
+    def load_package(
+        self,
+        package_path: str,
+        timeout_sec: float = MAP_PACKAGE_LOAD_TIMEOUT_SEC,
+    ):
         if not self.client.wait_for_service(timeout_sec=2.0):
-            return False, "读取服务 /map_package_manager/load_package 不可用。"
+            return (
+                False,
+                "读取服务 /map_package_manager/load_package 不可用。",
+                False,
+            )
 
         request = LoadNavigationMapPackage.Request()
         request.package_path = package_path
@@ -99,11 +117,15 @@ class LoadMapClient(Node):
             executor.remove_node(self)
             executor.shutdown()
         if not future.done():
-            return False, "读取地图超时。"
+            return False, "读取地图超时。", True
         result = future.result()
         if result is None:
-            return False, "读取地图失败，服务没有返回结果。"
-        return bool(result.success), str(result.message)
+            return (
+                False,
+                "读取地图失败，服务没有返回结果。",
+                True,
+            )
+        return bool(result.success), str(result.message), True
 
 
 class SaveWorker(QObject):
@@ -124,7 +146,7 @@ class SaveWorker(QObject):
 
 
 class LoadWorker(QObject):
-    finished = pyqtSignal(bool, str, str)
+    finished = pyqtSignal(bool, str, str, bool)
 
     def __init__(self, package_path: str) -> None:
         super().__init__()
@@ -133,10 +155,14 @@ class LoadWorker(QObject):
     def run(self) -> None:
         node = LoadMapClient()
         try:
-            ok, message = node.load_package(self.package_path)
+            ok, message, service_available = node.load_package(
+                self.package_path
+            )
         finally:
             node.destroy_node()
-        self.finished.emit(ok, message, self.package_path)
+        self.finished.emit(
+            ok, message, self.package_path, service_available
+        )
 
 
 class MapViewerRosNode(Node):
@@ -152,6 +178,12 @@ class MapViewerRosNode(Node):
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
+        command_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+        )
         self.start_pub = self.create_publisher(PointStamped, "/start_point", latched_qos)
         self.goal_pub = self.create_publisher(PointStamped, "/goal_point", latched_qos)
         self.goal_pose_pub = self.create_publisher(PoseStamped, "/goal_pose", latched_qos)
@@ -159,7 +191,7 @@ class MapViewerRosNode(Node):
             PoseWithCovarianceStamped, "/initialpose", 10
         )
         self.external_preblocked_pub = self.create_publisher(
-            Marker, "/edited_preblocked_cells_markers", latched_qos
+            Marker, "/edited_preblocked_cells_commands", command_qos
         )
         self.edited_occupied_pub = self.create_publisher(
             Marker, "/edited_occupied_markers", latched_qos
@@ -183,6 +215,12 @@ class MapViewerRosNode(Node):
         self.preblocked_sub = self.create_subscription(
             Marker, "/preblocked_cells_markers", self._on_preblocked, latched_qos
         )
+        self.external_preblocked_sub = self.create_subscription(
+            Marker,
+            "/edited_preblocked_cells_markers",
+            self._on_external_preblocked,
+            latched_qos,
+        )
         self.traversable_sub = self.create_subscription(
             Marker, "/traversable_cells_markers", self._on_traversable, latched_qos
         )
@@ -195,6 +233,10 @@ class MapViewerRosNode(Node):
         self._occupied_dirty = False
         self._latest_preblocked: tuple[np.ndarray, np.ndarray] | None = None
         self._preblocked_dirty = False
+        self._latest_external_preblocked: (
+            tuple[np.ndarray, np.ndarray, str] | None
+        ) = None
+        self._external_preblocked_dirty = False
         self._latest_traversable: tuple[np.ndarray, np.ndarray] | None = None
         self._traversable_dirty = False
         self._latest_risk: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
@@ -243,7 +285,7 @@ class MapViewerRosNode(Node):
         msg.pose.covariance[35] = 0.06853891909122467
         self.initial_pose_pub.publish(msg)
 
-    def publish_external_preblocked(
+    def publish_external_preblocked_command(
         self, frame_id: str, points: np.ndarray, scale: np.ndarray
     ) -> None:
         msg = Marker()
@@ -383,6 +425,22 @@ class MapViewerRosNode(Node):
         self._latest_preblocked = (points, scale)
         self._preblocked_dirty = True
 
+    def _on_external_preblocked(self, msg: Marker) -> None:
+        if msg.type != Marker.CUBE_LIST:
+            return
+        if msg.points:
+            points = np.array(
+                [[p.x, p.y, p.z] for p in msg.points], dtype=np.float32
+            )
+        else:
+            points = np.empty((0, 3), dtype=np.float32)
+        scale = np.array(
+            [msg.scale.x, msg.scale.y, msg.scale.z], dtype=np.float32
+        )
+        frame_id = str(msg.header.frame_id or "map")
+        self._latest_external_preblocked = (points, scale, frame_id)
+        self._external_preblocked_dirty = True
+
     def _on_traversable(self, msg: Marker) -> None:
         if msg.type != Marker.CUBE_LIST:
             return
@@ -434,6 +492,17 @@ class MapViewerRosNode(Node):
         self._preblocked_dirty = False
         return self._latest_preblocked
 
+    def consume_external_preblocked(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, str] | None:
+        if (
+            not self._external_preblocked_dirty
+            or self._latest_external_preblocked is None
+        ):
+            return None
+        self._external_preblocked_dirty = False
+        return self._latest_external_preblocked
+
     def consume_traversable(self) -> tuple[np.ndarray, np.ndarray] | None:
         if not self._traversable_dirty or self._latest_traversable is None:
             return None
@@ -479,13 +548,21 @@ class MapViewerWindow(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        configured_default_package = os.environ.get(
+            "MAP_VIEWER_DEFAULT_PACKAGE", ""
+        ).strip()
         default_map_package = Path(
-            os.environ.get("MAP_VIEWER_DEFAULT_PACKAGE", "/home/robot/maps/map")
+            configured_default_package or "/home/robot/maps/map"
         ).expanduser()
+        self._autoload_package = (
+            default_map_package if configured_default_package else None
+        )
         self._default_root = default_map_package.parent
         self._default_map_name = default_map_package.name
         self._suppress_next_load_dialog = False
         self._worker_thread: threading.Thread | None = None
+        self._worker: SaveWorker | LoadWorker | None = None
+        self._busy = False
         self._layer_actors: dict[str, tuple[vtk.vtkActor, vtk.vtkActor | None]] = {}
         self._layer_data: dict[str, tuple[np.ndarray, np.ndarray, tuple[float, float, float], float] | tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
         self._renderer = vtk.vtkRenderer()
@@ -505,13 +582,18 @@ class MapViewerWindow(QWidget):
         self._edit_cursor_edge_actor: vtk.vtkActor | None = None
         self._edit_position = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         self._edit_size_cells = 1
+        self._external_preblocked_points = np.empty((0, 3), dtype=np.float32)
+        self._external_preblocked_scale = np.array([0.2, 0.2, 0.2], dtype=np.float32)
+        self._external_preblocked_frame_id = "map"
+        self._external_preblocked_state_received = False
         self._init_ui()
         QApplication.instance().installEventFilter(self)
         self._spin_timer = QTimer(self)
         self._spin_timer.setTimerType(Qt.PreciseTimer)
         self._spin_timer.timeout.connect(self._spin_ros_once)
         self._spin_timer.start(20)
-        QTimer.singleShot(0, self._autoload_default_map)
+        if self._autoload_package is not None:
+            QTimer.singleShot(0, self._autoload_default_map)
 
     def _init_ui(self) -> None:
         self.setWindowTitle("地图查看")
@@ -525,11 +607,11 @@ class MapViewerWindow(QWidget):
         map_root_row = QHBoxLayout()
         self.path_edit = QLineEdit(str(self._default_root))
         self.path_edit.setPlaceholderText("选择地图根目录")
-        choose_root_btn = QPushButton("选择文件夹")
-        choose_root_btn.clicked.connect(self._choose_root_directory)
+        self.choose_root_btn = QPushButton("选择文件夹")
+        self.choose_root_btn.clicked.connect(self._choose_root_directory)
         map_root_row.addWidget(QLabel("根目录"))
         map_root_row.addWidget(self.path_edit, 1)
-        map_root_row.addWidget(choose_root_btn)
+        map_root_row.addWidget(self.choose_root_btn)
 
         map_name_row = QHBoxLayout()
         self.name_edit = QLineEdit()
@@ -542,15 +624,15 @@ class MapViewerWindow(QWidget):
         map_name_row.addWidget(self.overwrite_checkbox)
 
         map_button_row = QHBoxLayout()
-        open_btn = QPushButton("打开地图")
-        open_btn.clicked.connect(self._choose_and_open)
-        refresh_map_btn = QPushButton("刷新地图")
-        refresh_map_btn.clicked.connect(self._refresh_map_from_edited_occupied)
-        save_btn = QPushButton("保存地图")
-        save_btn.clicked.connect(self._start_save)
-        map_button_row.addWidget(open_btn)
-        map_button_row.addWidget(refresh_map_btn)
-        map_button_row.addWidget(save_btn)
+        self.open_btn = QPushButton("打开地图")
+        self.open_btn.clicked.connect(self._choose_and_open)
+        self.refresh_map_btn = QPushButton("刷新地图")
+        self.refresh_map_btn.clicked.connect(self._refresh_map_from_edited_occupied)
+        self.save_btn = QPushButton("保存地图")
+        self.save_btn.clicked.connect(self._start_save)
+        map_button_row.addWidget(self.open_btn)
+        map_button_row.addWidget(self.refresh_map_btn)
+        map_button_row.addWidget(self.save_btn)
 
         map_layout.addLayout(map_root_row)
         map_layout.addLayout(map_name_row)
@@ -687,7 +769,9 @@ class MapViewerWindow(QWidget):
             self.path_edit.setText(selected)
 
     def _autoload_default_map(self) -> None:
-        package_path = self._default_root / self._default_map_name
+        package_path = self._autoload_package
+        if package_path is None:
+            return
         if not package_path.exists():
             self.info_label.setText(f"默认地图不存在：{package_path}")
             return
@@ -708,9 +792,21 @@ class MapViewerWindow(QWidget):
         return Path(root_dir).expanduser() / map_name
 
     def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        if busy:
+            self._pick_mode = None
+            self._goal_pending_position = None
+            if self.edit_checkbox.isChecked():
+                self.edit_checkbox.setChecked(False)
+            else:
+                self._remove_edit_cursor()
         self.path_edit.setEnabled(not busy)
         self.name_edit.setEnabled(not busy)
         self.overwrite_checkbox.setEnabled(not busy)
+        self.choose_root_btn.setEnabled(not busy)
+        self.open_btn.setEnabled(not busy)
+        self.refresh_map_btn.setEnabled(not busy)
+        self.save_btn.setEnabled(not busy)
         self.start_btn.setEnabled(not busy)
         self.goal_btn.setEnabled(not busy)
         self.current_pose_btn.setEnabled(not busy)
@@ -721,20 +817,32 @@ class MapViewerWindow(QWidget):
         for radio in self.edit_type_buttons.values():
             radio.setEnabled(not busy)
 
+    def _worker_is_active(self) -> bool:
+        return self._busy or (
+            self._worker_thread is not None and self._worker_thread.is_alive()
+        )
+
     def _start_save(self) -> None:
+        if self._worker_is_active():
+            return
         package_path = self._build_package_path()
         if package_path is None:
             return
+        overwrite = self.overwrite_checkbox.isChecked()
+        # Disable every operation button before processEvents() below. Without
+        # this guard a second click can start another save while the first
+        # request is still waiting for the planner's derived-layer rebuild.
+        self._set_busy(True)
         if not self._publish_edited_occupied_for_cpp_refresh():
+            self._set_busy(False)
             return
         deadline = time.monotonic() + 0.5
         while time.monotonic() < deadline:
             rclpy.spin_once(self._ros_node, timeout_sec=0.0)
             QApplication.processEvents()
             time.sleep(0.02)
-        self._set_busy(True)
         self.info_label.setText(f"正在保存地图到 {package_path} ，请稍候。")
-        worker = SaveWorker(str(package_path), self.overwrite_checkbox.isChecked())
+        worker = SaveWorker(str(package_path), overwrite)
         worker.finished.connect(self._on_save_finished)
         thread = threading.Thread(target=worker.run, daemon=True)
         self._worker_thread = thread
@@ -742,6 +850,8 @@ class MapViewerWindow(QWidget):
         thread.start()
 
     def _start_load(self) -> None:
+        if self._worker_is_active():
+            return
         package_path = self._build_package_path()
         if package_path is None:
             return
@@ -751,6 +861,12 @@ class MapViewerWindow(QWidget):
         self._start_load_for_package(package_path)
 
     def _start_load_for_package(self, package_path: Path) -> None:
+        if self._worker_is_active():
+            return
+        # Do not allow the previous map's authored layer to be edited during
+        # the small window between a successful load response and delivery of
+        # the new authoritative transient-local marker.
+        self._external_preblocked_state_received = False
         self._set_busy(True)
         self.info_label.setText(f"正在加载地图 {package_path} ，请稍候。")
         worker = LoadWorker(str(package_path))
@@ -761,6 +877,8 @@ class MapViewerWindow(QWidget):
         thread.start()
 
     def _on_save_finished(self, success: bool, message: str) -> None:
+        self._worker_thread = None
+        self._worker = None
         self._set_busy(False)
         self.info_label.setText(message)
         if success:
@@ -768,14 +886,43 @@ class MapViewerWindow(QWidget):
         else:
             QMessageBox.critical(self, "保存地图", message)
 
-    def _on_load_finished(self, success: bool, message: str, package_path: str) -> None:
+    def _on_load_finished(
+        self,
+        success: bool,
+        message: str,
+        package_path: str,
+        service_available: bool,
+    ) -> None:
+        self._worker_thread = None
+        self._worker = None
         self._set_busy(False)
         suppress_dialog = self._suppress_next_load_dialog
         self._suppress_next_load_dialog = False
         if success:
-            self._load_map_package(Path(package_path))
+            # The manager has already installed the map and republished one
+            # coherent live snapshot.  Keep those authoritative layers instead
+            # of replacing them with the package's cached layers.npz copy.
+            self.info_label.setText(message)
+            if self._layer_data:
+                self._refresh_layers(reset_camera=True)
             if not suppress_dialog:
                 QMessageBox.information(self, "加载地图", "地图加载成功。")
+        elif not service_available:
+            # Offline inspection is useful when the manager is not running,
+            # but it is display-only: no cached layer is published as live
+            # planner state.
+            offline_loaded = self._load_map_package(Path(package_path))
+            # Cached layers are display-only.  Keep authored editing disabled
+            # until a running manager supplies an authoritative live state.
+            self._external_preblocked_state_received = False
+            if offline_loaded and not suppress_dialog:
+                QMessageBox.information(
+                    self,
+                    "离线打开地图",
+                    "地图管理服务不可用，已仅从 layers.npz "
+                    "离线显示；"
+                    "该地图尚未加载到规划器。",
+                )
         else:
             self.info_label.setText(message)
             if not suppress_dialog:
@@ -783,21 +930,36 @@ class MapViewerWindow(QWidget):
 
     def _spin_ros_once(self) -> None:
         rclpy.spin_once(self._ros_node, timeout_sec=0.0)
+        external_preblocked = self._ros_node.consume_external_preblocked()
+        if external_preblocked is not None:
+            points, scale, frame_id = external_preblocked
+            self._external_preblocked_points = np.asarray(
+                points, dtype=np.float32
+            ).reshape((-1, 3))
+            if np.all(np.asarray(scale) > 0.0):
+                self._external_preblocked_scale = np.asarray(
+                    scale, dtype=np.float32
+                )
+            self._external_preblocked_frame_id = frame_id or self._frame_id
+            self._external_preblocked_state_received = True
         occupied = self._ros_node.consume_occupied()
         if occupied is not None:
             points, scale = occupied
+            self._initialize_external_preblocked_scale(scale)
             color, opacity, _label = self._LAYER_STYLE["occupied"]
             self._layer_data["occupied"] = (points, scale, color, opacity)
             self._refresh_layers()
         preblocked = self._ros_node.consume_preblocked()
         if preblocked is not None:
             points, scale = preblocked
+            self._initialize_external_preblocked_scale(scale)
             color, opacity, _label = self._LAYER_STYLE["preblocked"]
             self._layer_data["preblocked"] = (points, scale, color, opacity)
             self._refresh_layers()
         traversable = self._ros_node.consume_traversable()
         if traversable is not None:
             points, scale = traversable
+            self._initialize_external_preblocked_scale(scale)
             color, opacity, _label = self._LAYER_STYLE["traversable"]
             self._layer_data["traversable"] = (points, scale, color, opacity)
             self._refresh_layers()
@@ -814,6 +976,8 @@ class MapViewerWindow(QWidget):
             self._update_path(path_points)
 
     def _set_pick_mode(self, mode: str) -> None:
+        if self._busy:
+            return
         if mode == "navigate" and self._latest_robot_pose is None:
             self.info_label.setText("未收到机器人 TF，无法设置导航目标。")
             return
@@ -831,6 +995,8 @@ class MapViewerWindow(QWidget):
             self.info_label.setText("点击 3D 视图设置目标点位置，再点击一次设置目标朝向。")
 
     def _on_left_button_press(self, obj, event) -> None:
+        if self._busy:
+            return
         if self._pick_mode is None:
             return
 
@@ -942,6 +1108,8 @@ class MapViewerWindow(QWidget):
             )
 
     def _on_mouse_move(self, obj, event) -> None:
+        if self._busy:
+            return
         if self._pick_mode not in ("goal_heading", "navigate_heading", "current_pose_heading") or self._goal_pending_position is None:
             return
 
@@ -1027,12 +1195,16 @@ class MapViewerWindow(QWidget):
         return xyz
 
     def eventFilter(self, obj, event):
+        if self._busy and event.type() in (QEvent.KeyPress, QEvent.KeyRelease):
+            return True
         if event.type() == QEvent.KeyPress and self.edit_checkbox.isChecked():
             if self._handle_edit_key(event):
                 return True
         return super().eventFilter(obj, event)
 
     def _handle_edit_key(self, event) -> bool:
+        if self._busy:
+            return True
         key = event.key()
         move_map = {
             Qt.Key_W: np.array([1.0, 0.0, 0.0], dtype=np.float32),
@@ -1057,11 +1229,15 @@ class MapViewerWindow(QWidget):
 
     def _refocus_view_if_editing(self, checked: bool = False) -> None:
         del checked
+        if self._busy:
+            return
         if self.edit_checkbox.isChecked():
             self.activateWindow()
             self.vtk_widget.setFocus()
 
     def _increase_edit_size(self) -> None:
+        if self._busy:
+            return
         self._edit_size_cells += 1
         if self.edit_checkbox.isChecked():
             self._update_edit_cursor()
@@ -1069,6 +1245,8 @@ class MapViewerWindow(QWidget):
         self.info_label.setText(f"编辑栅格尺寸：{self._edit_size_cells}x{self._edit_size_cells}x{self._edit_size_cells}")
 
     def _decrease_edit_size(self) -> None:
+        if self._busy:
+            return
         self._edit_size_cells = max(1, self._edit_size_cells - 1)
         if self.edit_checkbox.isChecked():
             self._update_edit_cursor()
@@ -1076,6 +1254,9 @@ class MapViewerWindow(QWidget):
         self.info_label.setText(f"编辑栅格尺寸：{self._edit_size_cells}x{self._edit_size_cells}x{self._edit_size_cells}")
 
     def _toggle_edit_mode(self, checked: bool) -> None:
+        if self._busy and checked:
+            self.edit_checkbox.setChecked(False)
+            return
         if checked:
             self._pick_mode = None
             self._initialize_edit_position()
@@ -1117,6 +1298,15 @@ class MapViewerWindow(QWidget):
                 return np.asarray(layer[1], dtype=np.float32)
         return np.array([0.2, 0.2, 0.2], dtype=np.float32)
 
+    def _initialize_external_preblocked_scale(self, scale: np.ndarray) -> None:
+        """Use the live map resolution before any authored cells exist."""
+        if self._external_preblocked_points.size:
+            return
+        live_scale = np.asarray(scale, dtype=np.float32)
+        if live_scale.shape == (3,) and np.all(live_scale > 0.0):
+            self._external_preblocked_scale = live_scale.copy()
+            self._external_preblocked_frame_id = self._frame_id
+
     def _remove_edit_cursor(self) -> None:
         if self._edit_cursor_actor is not None:
             self._renderer.RemoveActor(self._edit_cursor_actor)
@@ -1149,16 +1339,35 @@ class MapViewerWindow(QWidget):
         return "occupied"
 
     def _place_edit_voxel(self) -> None:
+        if self._busy:
+            return
         layer_name = self._selected_edit_layer()
         if layer_name == "clear":
             self._clear_edit_voxel()
             return
-        scale = self._get_edit_scale()
+        if layer_name == "preblocked" and not self._external_preblocked_state_received:
+            self.info_label.setText(
+                "正在等待人工禁行层的权威状态，暂不能编辑，以免覆盖已有数据。"
+            )
+            return
+        scale = (
+            np.asarray(self._external_preblocked_scale, dtype=np.float32)
+            if layer_name == "preblocked"
+            else self._get_edit_scale()
+        )
         color, opacity, label = self._LAYER_STYLE[layer_name]
         points = self._edit_block_points(scale)
 
-        if layer_name in self._layer_data:
+        if layer_name == "preblocked":
+            current_points = self._external_preblocked_points
+            current_scale = self._external_preblocked_scale
+        elif layer_name in self._layer_data:
             current_points, current_scale, _current_color, _current_opacity = self._layer_data[layer_name]
+        else:
+            current_points = np.empty((0, 3), dtype=np.float32)
+            current_scale = scale
+
+        if current_points.size:
             merged_points = current_points
             added = 0
             for point in points:
@@ -1177,7 +1386,16 @@ class MapViewerWindow(QWidget):
         else:
             points = points.astype(np.float32)
 
-        self._layer_data[layer_name] = (points, np.asarray(scale, dtype=np.float32), color, opacity)
+        if layer_name == "preblocked":
+            self._external_preblocked_points = points
+            self._external_preblocked_scale = np.asarray(scale, dtype=np.float32)
+        else:
+            self._layer_data[layer_name] = (
+                points,
+                np.asarray(scale, dtype=np.float32),
+                color,
+                opacity,
+            )
         checkbox_map = {
             "occupied": self.occupied_checkbox,
             "preblocked": self.preblocked_checkbox,
@@ -1195,13 +1413,33 @@ class MapViewerWindow(QWidget):
         )
 
     def _clear_edit_voxel(self) -> None:
+        if self._busy:
+            return
         scale = self._get_edit_scale()
         half_extent = np.asarray(scale, dtype=np.float32) * float(self._edit_size_cells) * 0.5
         min_corner = self._edit_position - half_extent
         max_corner = self._edit_position + half_extent
         epsilon = np.maximum(np.asarray(scale, dtype=np.float32) * 1.0e-3, 1.0e-6)
+        external_changed = False
+        if self._external_preblocked_points.size:
+            external_inside = np.all(
+                (self._external_preblocked_points >= (min_corner - epsilon))
+                & (self._external_preblocked_points <= (max_corner + epsilon)),
+                axis=1,
+            )
+            if np.any(external_inside):
+                self._external_preblocked_points = self._external_preblocked_points[
+                    ~external_inside
+                ].astype(np.float32)
+                external_changed = True
+
         changed_layers: list[str] = []
         for layer_name, layer in list(self._layer_data.items()):
+            # The displayed preblocked layer is the planner's aggregate. Only
+            # the separately tracked authored layer is editable; the planner
+            # will republish the aggregate after the update.
+            if layer_name == "preblocked":
+                continue
             if layer_name == "risk":
                 current_points, current_scale, intensity = layer
             else:
@@ -1233,7 +1471,7 @@ class MapViewerWindow(QWidget):
                 )
             changed_layers.append(layer_name)
 
-        if not changed_layers:
+        if not changed_layers and not external_changed:
             self.info_label.setText("当前位置没有可清除的栅格。")
             return
 
@@ -1241,7 +1479,7 @@ class MapViewerWindow(QWidget):
         if self.edit_checkbox.isChecked():
             self._update_edit_cursor()
         self._force_render()
-        if "preblocked" in changed_layers:
+        if external_changed:
             self._sync_external_preblocked()
         self.info_label.setText(
             f"已清空栅格块：中心[{self._edit_position[0]:.2f}, {self._edit_position[1]:.2f}, {self._edit_position[2]:.2f}] "
@@ -1269,18 +1507,17 @@ class MapViewerWindow(QWidget):
         return np.asarray(points, dtype=np.float32)
 
     def _sync_external_preblocked(self) -> None:
-        layer = self._layer_data.get("preblocked")
-        if layer is None:
-            self._ros_node.publish_external_preblocked(
-                self._frame_id,
-                np.empty((0, 3), dtype=np.float32),
-                self._get_edit_scale(),
-            )
+        if self._busy:
             return
-        points, scale, _color, _opacity = layer
-        self._ros_node.publish_external_preblocked(self._frame_id, points, scale)
+        self._ros_node.publish_external_preblocked_command(
+            self._external_preblocked_frame_id or self._frame_id,
+            self._external_preblocked_points,
+            self._external_preblocked_scale,
+        )
 
     def _refresh_map_from_edited_occupied(self) -> None:
+        if self._busy:
+            return
         if not self._publish_edited_occupied_for_cpp_refresh():
             return
         self._refresh_layers()
@@ -1872,6 +2109,8 @@ class MapViewerWindow(QWidget):
         return actor
 
     def _choose_and_open(self) -> None:
+        if self._worker_is_active():
+            return
         start_dir = self.path_edit.text().strip() or str(self._default_root)
         selected = QFileDialog.getExistingDirectory(
             self,
@@ -1886,12 +2125,12 @@ class MapViewerWindow(QWidget):
         self.name_edit.setText(selected_path.name)
         self._start_load_for_package(selected_path)
 
-    def _load_map_package(self, package_dir: Path) -> None:
+    def _load_map_package(self, package_dir: Path) -> bool:
         meta_path = package_dir / "meta.yaml"
         layers_path = package_dir / "layers.npz"
         if not meta_path.exists() or not layers_path.exists():
             QMessageBox.critical(self, "打开地图", "目录中缺少 meta.yaml 或 layers.npz。")
-            return
+            return False
 
         try:
             with meta_path.open("r", encoding="utf-8") as f:
@@ -1899,7 +2138,22 @@ class MapViewerWindow(QWidget):
             layers = np.load(layers_path, allow_pickle=False)
         except Exception as exc:
             QMessageBox.critical(self, "打开地图", f"读取地图失败：{exc}")
-            return
+            return False
+
+        self._frame_id = str(meta.get("frame_id", "map") or "map")
+        resolution = float(meta.get("resolution", 0.0))
+        default_resolution = resolution if resolution > 0.0 else 0.2
+        external_points, external_scale, external_frame_id = (
+            external_preblocked_layer_from_archive(
+                layers,
+                self._frame_id,
+                np.full(3, default_resolution, dtype=np.float64),
+            )
+        )
+        self._external_preblocked_points = external_points
+        self._external_preblocked_scale = external_scale.astype(np.float32)
+        self._external_preblocked_frame_id = external_frame_id
+        self._external_preblocked_state_received = True
 
         occupied_layer = self._layer_data.get("occupied")
         self._layer_data.clear()
@@ -1935,20 +2189,18 @@ class MapViewerWindow(QWidget):
 
         if not self._layer_data:
             QMessageBox.critical(self, "打开地图", "地图文件中没有可显示的体素层。")
-            return
+            return False
 
         self._refresh_layers(reset_camera=True)
-        self._sync_external_preblocked()
         if self.edit_checkbox.isChecked():
             self._initialize_edit_position()
             self._update_edit_cursor()
         map_id = meta.get("map_id", "")
-        resolution = meta.get("resolution", 0.0)
-        self._frame_id = meta.get("frame_id", "map")
         occupied_count = len(self._layer_data.get("occupied", (np.empty((0, 3)), None, None))[0])
         self.info_label.setText(
             f"地图：{map_id}    分辨率：{resolution:.2f} 米    占据体素：{occupied_count}"
         )
+        return True
 
     def _build_voxel_actors(
         self, points: np.ndarray, scale: np.ndarray, color: tuple[float, float, float], opacity: float

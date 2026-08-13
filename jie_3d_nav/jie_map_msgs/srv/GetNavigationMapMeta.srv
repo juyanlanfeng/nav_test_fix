@@ -1,6 +1,7 @@
 ---
 bool success
 string message
+uint64 state_revision
 string map_id
 string frame_id
 float64 resolution
@@ -19,3 +20,4 @@ bool enable_preblocked_costmap
 int32 preblocked_costmap_radius_cells
 float64 preblocked_costmap_weight
 string source_world_file
+visualization_msgs/Marker external_preblocked

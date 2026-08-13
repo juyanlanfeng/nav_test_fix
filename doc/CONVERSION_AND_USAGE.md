@@ -1,6 +1,6 @@
 # RMUC2026：同一 Gazebo 场景测试 MeshNav 与 JIE 全局规划器
 
-最后审计：2026-08-09，ROS 2 Humble + Gazebo Fortress（Ignition Gazebo 6）。
+最后审计：2026-08-11，ROS 2 Humble + Gazebo Fortress（Ignition Gazebo 6）。
 
 这份文档对应当前工作区 `/home/rainple/nav_test` 的实际文件和已验证参数，覆盖：
 
@@ -30,7 +30,7 @@
 | Gazebo 碰撞 | `rmuc2026_field_collision.stl` | binary STL，499,999 面，25,000,034 bytes | `0724d137…6704c` |
 | MeshNav 全局图 | `rmuc2026_field.ply` | binary little-endian，多层三角面；180,417 顶点、348,297 面 | `2dd79f2d…ad065` |
 | JIE 全局图源 | `rmuc2026_field.pcd` | PCD v0.7，binary XYZ float32；碰撞表面确定性栅格化，391,226 点 | `ba548bd9…5de44` |
-| MeshNav 工作缓存 | `meshnav_demo_ws/rmuc2026_field.h5` | 首次启动按新 PLY 重建的运行缓存；不是原始输入图 | 会随重建变化 |
+| MeshNav 工作缓存 | `meshnav_demo_ws/rmuc2026_field.h5` | 当前文件 3,847,792 bytes，2026-08-11 11:45；已按当前 profile 写入并完成离线重读 | PLY、launch 或层参数变化后必须重建 |
 
 完整路径分别是：
 
@@ -99,7 +99,7 @@ property list uchar int vertex_indices
 - 相邻射线使用互为最近高度的一对一层匹配，禁止地面与顶面交叉连边；
 - 最终保留最大的边连通曲面。
 
-`meshnav_demo_ws/rmuc2026_field.h5` 是由 PLY 和 MeshLayer 参数派生出来的运行缓存，不能把 H5 当成唯一源地图。
+`meshnav_demo_ws/rmuc2026_field.h5` 是由 PLY 和 MeshLayer 参数派生出来的运行缓存，不能把 H5 当成唯一源地图。`mesh_map_working_path` 是相对启动目录解析的，因此必须先进入 `meshnav_demo_ws` 再启动本教程；项目根目录中早于后续手动调参的同名 H5 已移动到 `field/converted_rmuc2026/cache_backups/`，不能代替 workspace 内的缓存。当前 workspace H5 已按 0.28 m 静态内切半径和现有 MeshLayer profile 重建，并在保存后确认 `border`、`height_diff`、`roughness` 层可重新读取；这只是缓存写入/读取证据，不等同于用最终 H5 完成了一轮 Gazebo 在线规划与行驶验收。以后任何 PLY、launch 或层参数变化仍须按第 8 节重新失效并生成。
 
 ### 2.3 JIE 所需格式
 
@@ -112,7 +112,7 @@ type:  octomap_msgs/msg/Octomap
 
 `Octomap` 消息包含 `frame_id`、最小体素分辨率和序列化的 `int8[] data`。JIE 规划节点把它恢复为占据体素、地面支撑与预阻塞代价，再输出 `nav_msgs/msg/Path`。
 
-RMUC 隧道专用 profile 必须使用 0.05 m OctoMap、0 m 预降采样、0.28 m 水平包络和 0.225 m 物理高度。这里的 `robot_height=0.225` 从支撑/地面量到车顶；它不是从候选自由体素中心再向上增加 0.225 m。0.225 m 来自当前 Ceres 仿真代理碰撞几何（0.215 m）加 10 mm 余量，不是真机实测值。
+RMUC 隧道专用 profile 必须使用 0.05 m OctoMap、0 m 预降采样、0.28 m 水平包络和 0.225 m 物理高度。这里的 `robot_height=0.225` 从支撑/地面量到车顶；它不是从候选自由体素中心再向上增加 0.225 m。0.225 m 来自当前 Ceres 仿真代理碰撞几何（0.215 m）加 10 mm 余量，不是真机实测值。JIE 的 `robot_radius_xy=0.28` 是不随车头方向旋转的圆柱近似：当前仿真代理外宽约 0.49 m，半宽约 0.245 m，因此半径留有约 35 mm 余量；它不是精确的带航向矩形 footprint，更不是由真机测量得到的外形参数。
 
 ## 3. 斜坡和隧道为什么曾经断开
 
@@ -124,7 +124,7 @@ RMUC 隧道专用 profile 必须使用 0.05 m OctoMap、0 m 预降采样、0.28 
 4. 某些近竖直三角面恰好与向下射线重合，第一版把它误当作顶板，得到错误的“净空不足”。
 5. 旧 JIE PCD 是在 2,234,919 面完整 visual mesh 上全局随机抽 303,144 个点。总点数看似很多，但小面积隧道地面没有逐体素覆盖保证；量化到 0.05 m 后只有 227,927 个 unique occupied voxels，正、负 Y 真隧道都无法形成路径，0.1 m 同样失败。与此同时，屋顶面积较大而被充分采样，于是形成“下层断开、屋顶还在”的现象。这不是单纯调机器人尺寸能修复的数据源缺洞。
 
-截图所示隧道的地面到顶板下表面约 0.246 m。原教程车碰撞包络约为 `0.53 × 0.55 × 0.305 m`，物理上不能通过。RMUC 专用配置保持车宽和轴距，只把轮半径改为 0.10 m，并下移 2-D/3-D 雷达；新碰撞包络约为 `0.48 × 0.55 × 0.215 m`，构图用 0.225 m，保留约 21 mm 几何余量。其他教程 world 仍使用原车型。
+截图所示隧道的地面到顶板下表面约 0.246 m。原教程车碰撞包络约为 `0.53 × 0.55 × 0.305 m`，物理上不能通过。RMUC 专用 profile 将车体参数化为 `0.32 × 0.26 × 0.10 m`，轮半径设为 0.10 m，并下移 2-D/3-D 雷达；包含车轮和 2-D 雷达后的新碰撞包络约为 `0.48 × 0.49 × 0.215 m`，构图用 0.225 m，保留约 21 mm 垂直几何余量。其他教程 world 通过独立的 legacy profile 保持约 `0.53 × 0.55 × 0.305 m` 的原车型。
 
 当前 Mesh 流程使用 0.05 m 多层采样、55°几何阈值和 0.225 m 净空，并从高精度 `visual.stl` 生成 PLY。当前结果有 16,008 个“同 XY、不同 Z”的最终顶点位置，实际最大三角面坡度约 54.870°，最终边连通域为 1、非流形边为 0。55°只用于保留短 CAD 过渡带，不应解释成真机可持续爬 55°坡。
 
@@ -219,7 +219,7 @@ RMUC world 还会自动采用：
 - 出生点 `(-11.9, -4.4, 0.15)`；
 - `laser3d_collision=False`，即高激光雷达桅杆不参与刚体碰撞；
 - 轮半径 `0.10 m`，2-D/3-D 雷达相对 `base_link` 的安装高度分别为 `0.060/0.050 m`；
-- RMUC 碰撞包络约 `0.48 × 0.55 × 0.215 m`，其中宽度和轴距不靠缩小来“挤过”隧道；
+- RMUC 仿真代理碰撞包络约 `0.48 × 0.49 × 0.215 m`；缩小后的 body 参数值只在 RMUC profile 中注入，其他教程 world 仍采用约 `0.53 × 0.55 × 0.305 m` 的 legacy 默认值；
 - `slope_aware_drive=True`，使用支持 `linear.x`、`linear.y` 且保留车体俯仰/横滚接触动力学的 RMUC 底盘插件；
 - 其他教程 world 仍默认 `(0, 0, 0.1)`、启用桅杆碰撞，并继续使用原来的轮式 `DiffDrive` 插件。
 
@@ -328,6 +328,7 @@ ros2 launch jie_octomap import_pcd_map.launch.py \
 ```
 
 - `rmuc2026_profile:=true` 一次性选择 `resolution=0.05`、`robot_radius_xy=0.28`、`robot_height=0.225`，并把 GUI 预降采样锁为 0；
+- `robot_radius_xy=0.28` 是方向无关的圆柱近似，比当前约 0.245 m 的仿真代理半宽多约 35 mm；不能把它解释为真机实测 footprint；
 - GUI 的“推荐转换参数”在此 profile 下也不会把分辨率自动推粗到 0.075/0.1 m；超过 0.05 m 的转换会被阻止；
 - `robot_height` 是从实际支撑体素对应的地面到车顶的物理高度，JIE 内部不会因为候选自由体素比支撑高一格而额外多算一个 resolution；
 - `min_points_per_voxel=1`、`min_cluster_voxels=1` 保留 deterministic PCD 中的全部已审计表面单元；
@@ -352,7 +353,7 @@ ros2 topic pub --once --qos-durability volatile \
 "{data: '/home/rainple/nav_test/field/converted_rmuc2026/jie_nav/rmuc2026_field.pcd'}"
 ```
 
-`--once` 只发布一次；消息内容不是点云本身，而是要读取的本地文件路径。`/pcd_file_cmd` 是一次性 volatile 事件；节点读取 binary PCD 后发布 transient-local `/octomap`，因此晚启动的 planner/RViz 也能收到最后一张地图。全图 0.05 m 派生地面支撑/预阻塞需要明显时间，等 `jie_path_node` 打印地图和派生层就绪后再发起终点。
+`--once` 只发布一次；消息内容不是点云本身，而是要读取的本地文件路径。`/pcd_file_cmd` 是一次性 volatile 事件；节点读取 binary PCD 后发布 transient-local `/octomap`，因此晚启动的 planner/RViz 也能收到最后一张地图。全图 0.05 m 派生地面支撑/预阻塞需要明显时间：当前 canonical PCD 的单进程回归中，候选式派生层核心重建约 140.1 s，连同预阻塞代价层到地图 ready 共约 157.5 s，峰值内存约 149 MiB。必须等 `jie_path_node` 打印地图和派生层就绪后再发起终点；这段启动耗时是当前仍需优化的性能瓶颈，不应误判为节点卡死。
 
 终端 D：启动 JIE 路径跟踪器和速度类型适配器：
 
@@ -450,7 +451,7 @@ rmuc2026_field.ply
   → Gazebo ignition.msgs.Twist
 ```
 
-当前 RMUC 参数中：`height_diff.threshold=0.2`、静态与动态内切半径 `0.28 m`、静态外膨胀 `0.5 m`、机器人高度 `0.225 m`。`0.28 m` 来自 0.55 m 总宽的一半再加 5 mm；它能通过截图隧道约 0.797 m 的净宽，但 MeshNav 的标量半径不是带航向的矩形 footprint，窄处必须低速做 Gazebo 碰撞回归。
+当前 RMUC 参数中：`height_diff.threshold=0.2`、`height_diff.radius=0.2`、`edge_cost_factor=8.0`，静态 inflation 的外/内半径为 `0.30/0.28 m`，动态障碍 inflation 的外/内半径为 `0.80/0.28 m`，机器人高度为 `0.225 m`。`0.28 m` 是方向无关的标量/圆柱近似，相比当前约 0.245 m 的仿真代理半宽留有约 35 mm 余量，但它不是会随车头旋转的矩形 footprint，也没有完整包住矩形四角；窄处仍必须低速做 Gazebo 碰撞回归，不能把该值冒充真机实测尺寸。
 
 ### 5.3 JIE
 
@@ -671,7 +672,7 @@ field/.step_convert_venv/bin/python field/build_multilevel_nav_mesh.py \
 - `ray-batch` 只影响内存/速度，不改变几何结果；
 - `min-component-area-m2=0` 表示只保留最大的边连通域。
 
-脚本会写独立 report，并自动把 PLY 路径、参数、面数和 SHA-256 回填到 `conversion_metadata.json`。RMUC profile 还会强制检查四条下层通道；任意一条只能走顶面或不连通时，生成命令会失败而不是静默交付坏图。只有生成文件哈希与旧文件相同时才继承人工验证字段，避免换参数后误用旧验证结论。
+脚本会写独立 report，并自动把 PLY 路径、参数、面数和 SHA-256 回填到 `conversion_metadata.json`。主 STEP 转换同时记录 `source_step_sha256`：只有源 STEP 字节哈希不变才保留旧下游 provenance；哈希改变或旧 metadata 没有该哈希时，会丢弃旧 PLY/PCD 验证结论，要求后续生成器重新闭环。RMUC profile 还会强制检查四条下层通道；任意一条只能走顶面或不连通时，生成命令会失败而不是静默交付坏图。只有生成文件哈希与旧文件相同时才继承人工验证字段，避免换参数后误用旧验证结论。
 
 ### 7.7 同步到 ROS 工作区并重建
 
@@ -702,6 +703,8 @@ python3 field/verify_rmuc_project.py
 ```
 
 ## 8. H5 缓存失效规则
+
+H5 工作路径相对启动进程的当前目录。所有本文命令都应先执行 `cd /home/rainple/nav_test/meshnav_demo_ws`，确保实际读写的是 `meshnav_demo_ws/rmuc2026_field.h5`。当前 workspace 文件为 3,847,792 bytes，修改时间为 2026-08-11 11:45，SHA-256 为 `510beb30171673916b0100a3611656f8e4d1a1d29742309a1a9b058a74b68e7d`；它已按当前 `height_diff.radius=0.2`、`height_diff.threshold=0.2`、`edge_cost_factor=8.0`、静态/动态内切半径 0.28 m 的 profile 重建并写入 73,170 个静态 inflation 值，且缓存时间晚于 canonical PLY、顶层 tutorial launch 和 `mbf_mesh_nav.yaml`。项目根目录中的旧同名缓存与一次无 `/clock` 的不完整缓存均已移入 `field/converted_rmuc2026/cache_backups/`，未删除但不会再被误加载。当前证据覆盖 H5 写入和层重读；最终 profile 下的完整 Gazebo 在线 `GetPath`、`MoveBase` 与物理过隧道仍需用户按第 5 节重跑后才能视为最终验收。
 
 只要发生下列任一变化，就不能继续使用旧 `rmuc2026_field.h5`：
 
@@ -925,18 +928,18 @@ Gazebo 在 Ctrl-C 后由 launch 报 `-2` 通常只是 SIGINT 的正常退出表�
 - PLY：180,417 顶点、348,297 三角形、1 个边连通域、0 个非流形边；
 - 正、负 Y 两条低隧道均在 `z<0.10 m` 的下层连通，顶面仍作为独立可行驶层保留；
 - 两处反向法线断带的下层连通，且 `z≈-0.141 m` 的场地底壳没有进入导航图；
-- RMUC xacro 生成的碰撞包络约 `0.48 × 0.55 × 0.215 m`，旧教程 profile 仍保持原尺寸；
+- RMUC xacro 生成的仿真代理碰撞包络约 `0.48 × 0.49 × 0.215 m`，legacy 教程 profile 仍保持约 `0.53 × 0.55 × 0.305 m`；
 - 碰撞网格：保留约 95.54% 表面积、98.04% XY 投影面积，低层 1 mm 内层召回约 99.452%；
 - Mesh 多层生成器 4 个单元回归通过，正式 report 内 4 条区域化低层连通检查全部通过；
-- Mesh H5 已按 canonical PLY 重建：2026-08-09 13:48，3,379,016 bytes；
-- Mesh 在线 `GetPath` 正 Y 真隧道：`outcome=0`，长度 1.05016 m，路径 z 范围 `[-0.0044,0.004] m`；负 Y 对称隧道同样 `outcome=0`，长度 1.05007 m；
-- Gazebo 正 Y 隧道入口从 `(-1.45,5.95)` 以 0.2 m/s 直驱到 `x=-0.32665`，确认当前仿真碰撞代理可物理穿过；完整 Mesh `MoveBase` 为 `outcome=0`，最终位置 `(-0.57735,5.93788,z=0.00438)`；
+- Mesh workspace 当前 H5 文件为 2026-08-11 11:45、3,847,792 bytes；已按当前 profile 重建并完成层重读，项目根目录及调参前缓存均已隔离到 `cache_backups`；
+- Mesh 在线 `GetPath` 正 Y 真隧道曾得到 `outcome=0`、长度 1.05016 m、路径 z 范围 `[-0.0044,0.004] m`，负 Y 对称隧道曾得到 `outcome=0`、长度 1.05007 m；这些在线结果早于最终参数/H5 固化，是历史基线，不是当前最终 H5 的在线验收；
+- Gazebo 正 Y 隧道入口曾从 `(-1.45,5.95)` 以 0.2 m/s 直驱到 `x=-0.32665`，完整 Mesh `MoveBase` 曾为 `outcome=0`、最终位置 `(-0.57735,5.93788,z=0.00438)`；这些结果同样早于最终参数/H5，用户仍需按第 5 节重跑后记录新证据；
 - 新 JIE PCD 由 collision STL 在约 11.7 s 内确定性生成 391,226 个表面单元；canonical SHA-256 为 `ba548bd9…5de44`，重复生成字节哈希相同；
 - JIE 离线真隧道验收使用 0.05 m、水平半径 0.28 m、物理高度 0.225 m：正 Y 22 个路径单元/42 次 A* 迭代，负 Y 19 个路径单元/19 次迭代，两者路径 z 均固定为 0.075 m；0.1 m 对两条均按预期拒绝；
-- JIE 真实 ROS/OctoMap 链在同一 RMUC profile 下也通过：正 Y 为 28 次 A* 迭代/22 poses，端点 `(-1.475,5.925)→(-0.425,5.975)`；负 Y 为 19 次迭代/19 poses，端点 `(1.375,-5.975)→(0.475,-5.975)`；两条路径的 `z_min=z_max=0.075000003 m`，没有吸附到屋顶；
-- JIE 表面 PCD 新增 2 个确定性/负坐标体素中心单测；碰撞包络 9/9 gtest 通过，覆盖 0.246 m 可通边界、0.20 m 拒绝、support depth、无支撑同层障碍和负 Z 预阻塞；三包增量 build 通过；
+- JIE 当前源码的单进程嵌入式 ROS/OctoMap 回归也通过：正 Y 为 28 次 A* 迭代/22 poses，端点 `(-1.475,5.925)→(-0.425,5.975)`；负 Y 为 19 次迭代/19 poses，端点 `(1.375,-5.975)→(0.475,-5.975)`；两条路径的 `z_min=z_max=0.075000003 m`，没有吸附到屋顶。该回归直接加载 canonical PCD 并运行当前 `JiePathNode`，但受执行环境 DDS 多进程发现限制，不等同于本轮重新启动了一次完整 Gazebo 多进程链；
+- JIE 表面 PCD 新增 2 个确定性/负坐标体素中心单测；碰撞包络 10/10 gtest、地图包 schema 5/5 pytest 通过，覆盖 0.246 m 可通边界、0.20 m 拒绝、support depth、无支撑同层障碍、负 Z 预阻塞、参数逐轴回退和地图包兼容性；三包增量 build 通过；
 - JIE `Path → Twist → TwistStamped → Gazebo` 的完整控制链此前已验证机器人可移动并响应 stop；本轮 canonical PCD 的在线双隧道结果以本节随后记录的独立 ROS 回归为准；
-- Mesh 工作区当前结果：91 tests，0 errors，0 failures（2 skipped）；
+- Mesh 工作区当前 `colcon test-result` 汇总：379 tests，0 errors，0 failures（74 skipped）；
 - MBF 带 live simulation 的三轮启动/退出均返回 0。
 
 编译时来自旧 `jsoncpp`/Ignition CMake 配置的 deprecation warning 不等同于编译失败；以 `Summary: ... finished` 和返回码为准。
@@ -945,10 +948,11 @@ Gazebo 在 Ctrl-C 后由 launch 报 `-2` 通常只是 SIGINT 的正常退出表�
 
 - 顶层 tutorial launch 会在 `map_name=rmuc2026_field` 时自动注入 holonomic、0.225 m 机器人高度和 0.28 m 内切半径；其他地图继续使用原教程默认值。若绕过顶层 launch、直接启动 `mbf_mesh_navigation_server_launch.py`，则必须自行传入这些 RMUC profile 参数。
 - JIE 的通用 PCD 导入默认值仍保持旧地图兼容；RMUC2026 必须显式使用 `rmuc2026_profile:=true`。此 profile 的 0.05 m 分辨率和 0 降采样是 0.246 m 真隧道的组成条件，不能换成 0.1 m 后再通过缩小碰撞高度“修通”。
-- 当前 0.215 m 车体碰撞高度、0.225 m 规划高度和 0.28 m 水平半径来自 CAD/xacro 与 Gazebo 仿真代理。它们说明这一个仿真模型的能力，不等于真机测量；拿到真机包络、悬挂压缩量和动态坡度能力后必须重新生成并验收两套地图。
+- 当前约 `0.48 × 0.49 × 0.215 m` 的碰撞包络、0.225 m 规划高度和 0.28 m 水平圆柱近似来自 CAD/xacro 与 Gazebo 仿真代理。0.28 m 对约 0.245 m 半宽有余量，但不是带航向的精确 footprint；这些参数只说明这一个仿真模型的能力，不等于真机测量。拿到真机包络、悬挂压缩量和动态坡度能力后必须重新生成并验收两套地图。
 - 保存/重载 JIE 地图包时，`robot_radius_xy`、`robot_height` 和其他派生层参数会随 metadata 传递；加载默认只重新发布 authoritative OctoMap，由 planner 按当前 profile 重算派生层，避免旧缓存 preblocked/traversable/risk 与新参数的同名双 publisher 竞态。
+- GUI 保存 JIE 全场地图时会先等待当前占据编辑对应的派生层重建，再导出同一版本的快照；导出内部超时为 300 s，GUI 外层超时为 360 s。当前地图通常需约 158 s，期间窗口仍在后台等待，不能在终端重复点击保存或强制结束 planner。
 - 仿真 launch 同样按 `world_name` 隔离底盘：RMUC 自动使用 0.10 m 轮半径、低安装雷达和 `slope_aware_drive`；parking/tray/floor_is_lava 保留原尺寸与 `DiffDrive`，避免 RMUC 适配改变旧教程世界。
-- `rmuc2026_field_visual.stl` 为 111,746,034 bytes，超过 GitHub 普通单文件 100 MiB 限制。若要推送远程仓库，应使用 Git LFS、Release 外部资产或另行分发，不能普通 `git push`。
+- 仓库 `.gitignore` 会排除 `*.stp`/`*.step`、`*.pcd`、`*.h5`、整个 `field/converted_rmuc2026/` 以及 `rmuc2026_field_visual.stl`；其中 visual STL 为 111,746,034 bytes，也超过 GitHub 普通单文件 100 MiB 限制。因此普通 commit/push 不会交付当前 STEP、canonical PLY/PCD、Gazebo 网格和 H5。换机器或全新 clone 时必须通过 Git LFS、Release/外部资产一并分发，或获取源 STEP 后按第 7 节重建并运行审计，不能只依赖源码仓库。
 - 当前修改已写入文件并完成 build/test，但没有代替用户创建 Git commit。关闭 VSCode 不会丢失工作树内容；正式交付前应由仓库维护者审阅并提交。
-- `octo_planner` 和本次修改过的 `import_pcd_map.launch.py` 已通过各自检查；但 `jie_octomap` 整个历史包的全量 ament lint 仍有 110 个既有样式失败，集中在未参与本流程的旧 GUI/launch 文件（长行、尾随空格以及 3 个 C++ 格式项）。它们不影响当前 build 或已验证运行链路，但若要求整个仓库 CI 全绿，需要另开一次纯格式清理并审阅大范围 diff。
+- `octo_planner`、地图包 schema 5/5 和本次修改过的 `import_pcd_map.launch.py` 已通过目标检查；但 JIE 全包 CI 不能表述为全绿：现存历史 test-result 汇总为 185 tests、106 failures、14 skipped；当前单独重跑的 flake8 为 24 个文件共 99 条错误，uncrustify 为 3 个文件失败，`octo_planner` 的 xmllint 还有 1 项因沙箱无法联网获取 XSD 而失败。若要求整个仓库 CI 全绿，需要区分真实格式问题与离线 XSD 环境问题后另行清理、复测。
 - 两套规划器对“可通行”的模型不同。机器人尺寸、最低净空或最大可爬坡度变化后，必须同时重新评估 collision STL、Mesh PLY、JIE 体素参数和 controller 参数，不能只改一个阈值。

@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import rclpy
 from jie_map_msgs.srv import SaveNavigationMapPackage
+from jie_octomap.map_package_schema import MAP_PACKAGE_SAVE_TIMEOUT_SEC
 from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
@@ -52,7 +53,12 @@ class SaveMapClient(Node):
             SaveNavigationMapPackage, "/map_package_manager/save_package"
         )
 
-    def save_package(self, package_path: str, overwrite: bool, timeout_sec: float = 10.0):
+    def save_package(
+        self,
+        package_path: str,
+        overwrite: bool,
+        timeout_sec: float = MAP_PACKAGE_SAVE_TIMEOUT_SEC,
+    ):
         if not self.client.wait_for_service(timeout_sec=2.0):
             return False, "保存服务 /map_package_manager/save_package 不可用。"
 

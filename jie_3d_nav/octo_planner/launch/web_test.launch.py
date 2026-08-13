@@ -266,7 +266,6 @@ def generate_launch_description():
         name="map_viewer_gui",
         output="screen",
         condition=IfCondition(LaunchConfiguration("launch_map_gui")),
-        additional_env={"MAP_VIEWER_DEFAULT_PACKAGE": map_package_dir},
         parameters=[
             {
                 "tf_parent_frame": "map",

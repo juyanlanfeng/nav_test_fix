@@ -14,6 +14,7 @@ import rclpy
 from geometry_msgs.msg import PointStamped, PoseStamped
 from nav_msgs.msg import Path as PathMsg
 from jie_map_msgs.srv import SaveNavigationMapPackage
+from jie_octomap.map_package_schema import MAP_PACKAGE_SAVE_TIMEOUT_SEC
 from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
 from rcl_interfaces.srv import SetParameters
 from PyQt5.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
@@ -250,7 +251,12 @@ class PcdMapImportNode(Node):
         self._risk_dirty = False
         return self._latest_risk
 
-    def save_package(self, package_path: str, overwrite: bool, timeout_sec: float = 10.0):
+    def save_package(
+        self,
+        package_path: str,
+        overwrite: bool,
+        timeout_sec: float = MAP_PACKAGE_SAVE_TIMEOUT_SEC,
+    ):
         if not self.save_client.wait_for_service(timeout_sec=2.0):
             return False, "保存服务 /map_package_manager/save_package 不可用。"
 
@@ -311,6 +317,8 @@ class PcdMapImportWindow(QWidget):
         self._has_previewed_pcd = False
         self._has_converted_map = False
         self._worker_thread: threading.Thread | None = None
+        self._worker: SaveWorker | None = None
+        self._save_in_progress = False
         self._ros_node = PcdMapImportNode()
         self._rmuc2026_profile = bool(
             self._ros_node.get_parameter("rmuc2026_profile").value
@@ -440,9 +448,9 @@ class PcdMapImportWindow(QWidget):
         self.overwrite_checkbox.setChecked(True)
         save_form.addRow("", self.overwrite_checkbox)
 
-        save_btn = QPushButton("保存Octomap地图")
-        save_btn.clicked.connect(self._save_package)
-        save_form.addRow("", save_btn)
+        self.save_btn = QPushButton("保存Octomap地图")
+        self.save_btn.clicked.connect(self._save_package)
+        save_form.addRow("", self.save_btn)
         save_group.setLayout(save_form)
 
         self.status_label = QLabel("等待操作。")
@@ -780,6 +788,10 @@ class PcdMapImportWindow(QWidget):
         return Path(root_dir).expanduser() / map_name
 
     def _save_package(self) -> None:
+        if self._save_in_progress or (
+            self._worker_thread is not None and self._worker_thread.is_alive()
+        ):
+            return
         if not self._has_converted_map:
             QMessageBox.warning(self, "地图包保存", "请先完成 Octomap 转换。")
             return
@@ -788,8 +800,10 @@ class PcdMapImportWindow(QWidget):
         if package_path is None:
             return
 
+        overwrite = self.overwrite_checkbox.isChecked()
+        self._set_save_busy(True)
         self.status_label.setText(f"正在保存地图包到 {package_path} ，请稍候。")
-        worker = SaveWorker(str(package_path), self.overwrite_checkbox.isChecked())
+        worker = SaveWorker(str(package_path), overwrite)
         worker.finished.connect(self._on_save_finished)
         thread = threading.Thread(target=worker.run, daemon=True)
         self._worker_thread = thread
@@ -797,11 +811,21 @@ class PcdMapImportWindow(QWidget):
         thread.start()
 
     def _on_save_finished(self, success: bool, message: str) -> None:
+        self._worker_thread = None
+        self._worker = None
+        self._set_save_busy(False)
         self.status_label.setText(message)
         if success:
             QMessageBox.information(self, "地图包保存", "地图包保存成功。")
         else:
             QMessageBox.critical(self, "地图包保存", message)
+
+    def _set_save_busy(self, busy: bool) -> None:
+        self._save_in_progress = busy
+        self.root_edit.setEnabled(not busy)
+        self.name_edit.setEnabled(not busy)
+        self.overwrite_checkbox.setEnabled(not busy)
+        self.save_btn.setEnabled(not busy)
 
     def _save_edited_pcd(self) -> None:
         if self._working_cloud is None or not self._working_cloud.has_points():

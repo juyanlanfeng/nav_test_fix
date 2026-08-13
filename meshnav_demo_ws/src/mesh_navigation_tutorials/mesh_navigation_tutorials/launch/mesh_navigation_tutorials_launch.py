@@ -174,7 +174,7 @@ def generate_launch_description():
                 ['"0.3" if "', map_name, '" == "rmuc2026_field" else "1.5"']
             ),
             "static_inscribed_radius": PythonExpression(
-                ['"0.23" if "', map_name, '" == "rmuc2026_field" else "0.4"']
+                ['"0.28" if "', map_name, '" == "rmuc2026_field" else "0.4"']
             ),
             "obstacle_robot_height": PythonExpression(
                 ['"0.225" if "', map_name, '" == "rmuc2026_field" else "0.7"']

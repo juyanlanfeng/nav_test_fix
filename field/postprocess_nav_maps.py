@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 from pathlib import Path
 import re
@@ -18,6 +17,12 @@ from build_component_collision_mesh import (
     build_component_collision,
     load_single_mesh,
     sha256,
+)
+from conversion_metadata import (
+    load_json_object,
+    merge_hashed_object,
+    merge_hashed_section,
+    write_json_object,
 )
 
 
@@ -246,16 +251,37 @@ def simplify_gazebo(
             "output_faces": int(len(collision.faces)),
         }
     collision.export(source_collision, file_type="stl")
+    collision_hash = sha256(source_collision)
     stats.update(
         {
+            "source": str(visual_path.resolve()),
+            "output": str(source_collision.resolve()),
+            "source_sha256": sha256(visual_path),
+            "output_sha256": collision_hash,
             "visual_mesh_preserved": visual_path.name,
             "collision_mesh": source_collision.name,
-            "collision_sha256": sha256(source_collision),
+            "collision_sha256": collision_hash,
             "collision_file_size_bytes": source_collision.stat().st_size,
         }
     )
 
     return stats
+
+
+def default_collision_report_path(
+    base: Path, model_name: str, collision_method: str, face_budget: int
+) -> Path:
+    """Return the report path consumed by the project verifier."""
+    budget_label = (
+        f"{face_budget // 1000}k" if face_budget % 1000 == 0 else str(face_budget)
+    )
+    method_label = collision_method.replace("-", "_")
+    return (
+        base
+        / "gazebo"
+        / "collision_candidates"
+        / f"{model_name}_collision_{method_label}_{budget_label}.json"
+    )
 
 
 def main() -> None:
@@ -277,6 +303,11 @@ def main() -> None:
     parser.add_argument("--collision-mandatory-max-z", type=float, default=0.35)
     parser.add_argument("--collision-optional-max-z", type=float, default=1.0)
     parser.add_argument(
+        "--collision-report",
+        type=Path,
+        help="collision provenance JSON (default: gazebo/collision_candidates/...)",
+    )
+    parser.add_argument(
         "--allow-legacy-single-layer",
         action="store_true",
         help=(
@@ -285,6 +316,15 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    metadata_path = args.base / "conversion_metadata.json"
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            f"missing conversion metadata; run step_to_nav_maps.py first: {metadata_path}"
+        )
+    # Validate and capture prior evidence before rewriting a large collision
+    # artifact, so malformed provenance cannot leave a half-updated tree.
+    metadata = load_json_object(metadata_path)
 
     terrain = None
     samples = 0
@@ -319,8 +359,17 @@ def main() -> None:
         f"{collision_stats['source_faces']} -> {collision_stats['output_faces']}"
     )
 
-    metadata_path = args.base / "conversion_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    collision_report_path = args.collision_report or default_collision_report_path(
+        args.base, args.model_name, args.collision_method, args.collision_faces
+    )
+    collision_report = merge_hashed_object(
+        load_json_object(collision_report_path),
+        collision_stats,
+        ("output_sha256", "sha256"),
+    )
+    write_json_object(collision_report_path, collision_report)
+    log(f"Wrote collision report: {collision_report_path}")
+
     if terrain is not None:
         metadata["mesh_planner_legacy_single_layer_postprocess"] = {
             "deprecated": True,
@@ -331,10 +380,13 @@ def main() -> None:
             "triangles": int(len(terrain.faces)),
             "bounds_m": terrain.bounds.tolist(),
         }
-    metadata["gazebo_collision_postprocess"] = collision_stats
-    metadata_path.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    merge_hashed_section(
+        metadata,
+        "gazebo_collision_postprocess",
+        collision_stats,
+        "collision_sha256",
     )
+    write_json_object(metadata_path, metadata)
 
 
 if __name__ == "__main__":

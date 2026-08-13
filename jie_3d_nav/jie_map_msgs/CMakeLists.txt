@@ -8,9 +8,13 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
+find_package(octomap_msgs REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 set(srv_files
+  "srv/ApplyNavigationMapSnapshot.srv"
   "srv/ExportNavigationSnapshot.srv"
   "srv/GetNavigationMapMeta.srv"
   "srv/LoadNavigationMapPackage.srv"
@@ -22,6 +26,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   DEPENDENCIES
     builtin_interfaces
     geometry_msgs
+    octomap_msgs
+    rcl_interfaces
+    visualization_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

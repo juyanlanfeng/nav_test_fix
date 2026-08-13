@@ -165,7 +165,9 @@ def generate_launch_description():
                 ),
                 description=(
                     "Horizontal collision radius in meters. The RMUC Ceres profile "
-                    "uses 0.28 m (half of its approximately 0.55 m width plus rounding)."
+                    "uses 0.28 m, providing margin above the approximately 0.245 m "
+                    "half-width of the tuned simulation proxy. This directionless "
+                    "circle is not an exact yaw-aware rectangular footprint."
                 ),
             ),
             DeclareLaunchArgument(

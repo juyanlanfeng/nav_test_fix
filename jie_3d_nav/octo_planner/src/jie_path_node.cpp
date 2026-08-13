@@ -3,7 +3,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <sstream>
 #include <string>
@@ -14,6 +16,7 @@
 
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include "jie_map_msgs/srv/apply_navigation_map_snapshot.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "jie_map_msgs/srv/export_navigation_snapshot.hpp"
 #include "jie_map_msgs/srv/get_navigation_map_meta.hpp"
@@ -75,15 +78,64 @@ double euclidean(const GridIndex & a, const GridIndex & b)
   return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-std::uint64_t hashOctomapData(const std::vector<int8_t> & data)
+void appendHashBytes(std::uint64_t & hash, const void * data, std::size_t size)
 {
-  // FNV-1a 64-bit
-  std::uint64_t h = 1469598103934665603ULL;
-  for (const auto v : data) {
-    h ^= static_cast<std::uint8_t>(v);
-    h *= 1099511628211ULL;
+  const auto * bytes = static_cast<const std::uint8_t *>(data);
+  for (std::size_t index = 0; index < size; ++index) {
+    hash ^= bytes[index];
+    hash *= 1099511628211ULL;
   }
-  return h;
+}
+
+template<typename T>
+void appendHashValue(std::uint64_t & hash, const T & value)
+{
+  appendHashBytes(hash, &value, sizeof(T));
+}
+
+void appendHashString(std::uint64_t & hash, const std::string & value)
+{
+  const std::uint64_t size = value.size();
+  appendHashValue(hash, size);
+  appendHashBytes(hash, value.data(), value.size());
+}
+
+std::uint64_t hashOctomapMessage(const octomap_msgs::msg::Octomap & msg)
+{
+  std::uint64_t hash = 1469598103934665603ULL;
+  appendHashString(hash, msg.header.frame_id);
+  appendHashString(hash, msg.id);
+  appendHashValue(hash, msg.binary);
+  appendHashValue(hash, msg.resolution);
+  appendHashBytes(hash, msg.data.data(), msg.data.size());
+  return hash;
+}
+
+std::uint64_t hashExternalPreblockedMarker(
+  const visualization_msgs::msg::Marker & marker)
+{
+  std::uint64_t hash = 1469598103934665603ULL;
+  appendHashString(hash, marker.header.frame_id);
+  appendHashValue(hash, marker.type);
+  appendHashValue(hash, marker.action);
+  appendHashValue(hash, marker.pose.position.x);
+  appendHashValue(hash, marker.pose.position.y);
+  appendHashValue(hash, marker.pose.position.z);
+  appendHashValue(hash, marker.pose.orientation.x);
+  appendHashValue(hash, marker.pose.orientation.y);
+  appendHashValue(hash, marker.pose.orientation.z);
+  appendHashValue(hash, marker.pose.orientation.w);
+  appendHashValue(hash, marker.scale.x);
+  appendHashValue(hash, marker.scale.y);
+  appendHashValue(hash, marker.scale.z);
+  const std::uint64_t point_count = marker.points.size();
+  appendHashValue(hash, point_count);
+  for (const auto & point : marker.points) {
+    appendHashValue(hash, point.x);
+    appendHashValue(hash, point.y);
+    appendHashValue(hash, point.z);
+  }
+  return hash;
 }
 }  // namespace
 
@@ -192,16 +244,21 @@ public:
       std::bind(
         &JiePathNode::handleExportSnapshot, this, std::placeholders::_1,
         std::placeholders::_2));
+    apply_snapshot_srv_ = create_service<jie_map_msgs::srv::ApplyNavigationMapSnapshot>(
+      "~/apply_snapshot",
+      std::bind(
+        &JiePathNode::handleApplySnapshot, this, std::placeholders::_1,
+        std::placeholders::_2));
     parameter_callback_handle_ = add_on_set_parameters_callback(
       std::bind(&JiePathNode::onParametersChanged, this, std::placeholders::_1));
 
     RCLCPP_INFO(
       get_logger(),
       "jie_path_node started. octomap=%s start=%s goal=%s path=%s preblocked_marker=%s "
-      "edited_occupied=%s meta_service=%s export_service=%s",
+      "edited_occupied=%s meta_service=%s export_service=%s apply_service=%s",
       octomap_topic.c_str(), start_topic.c_str(), goal_topic.c_str(), path_topic.c_str(),
       preblocked_marker_topic.c_str(), edited_occupied_marker_topic.c_str(), "~/get_meta",
-      "~/export_snapshot");
+      "~/export_snapshot", "~/apply_snapshot");
 
     const auto envelope = robotCollisionEnvelope();
     RCLCPP_INFO(
@@ -222,13 +279,46 @@ private:
       "lowest_traversable_only",
       "enable_preblocked_costmap", "preblocked_costmap_radius_cells",
       "preblocked_costmap_weight"};
-    for (const auto & parameter : parameters) {
-      if (navigation_parameters.find(parameter.get_name()) != navigation_parameters.end()) {
-        // The next OctoMap publication must rebuild derived layers even if its
-        // serialized occupancy bytes are identical to the current map.
-        last_octomap_hash_ = 0;
-        break;
+    static const std::unordered_set<std::string> persistent_parameters{
+      "frame_id", "map_id", "source_world_file",
+      "robot_radius", "robot_radius_xy", "robot_height", "snap_search_radius_cells",
+      "require_ground_support", "strict_direct_ground_support",
+      "ground_support_xy_radius_cells", "ground_support_depth_cells",
+      "lowest_traversable_only",
+      "enable_preblocked_costmap", "preblocked_costmap_radius_cells",
+      "preblocked_costmap_weight"};
+    bool navigation_changed = false;
+    bool persistent_state_changed = false;
+    std::unordered_set<std::string> processed_parameters;
+    for (auto parameter_it = parameters.rbegin(); parameter_it != parameters.rend();
+      ++parameter_it)
+    {
+      const auto & parameter = *parameter_it;
+      const auto & name = parameter.get_name();
+      // rclcpp commits only the last occurrence of a duplicate parameter in
+      // an atomic request.  Mirror that rule when deciding whether state
+      // actually changes, otherwise [new, old] would create a false revision.
+      if (!processed_parameters.insert(name).second) {
+        continue;
       }
+      if (persistent_parameters.find(name) == persistent_parameters.end() ||
+        parameter == get_parameter(name))
+      {
+        continue;
+      }
+      persistent_state_changed = true;
+      if (navigation_parameters.find(name) != navigation_parameters.end()) {
+        navigation_changed = true;
+      }
+    }
+    if (navigation_changed) {
+      // Keep the current map hash intact so an identical DDS self-echo is not
+      // mistaken for a map mutation.  The dirty flag alone forces a rebuild
+      // with the newly committed navigation profile.
+      derived_layers_dirty_ = true;
+    }
+    if (persistent_state_changed) {
+      incrementStateRevision();
     }
     rcl_interfaces::msg::SetParametersResult result;
     result.successful = true;
@@ -267,6 +357,7 @@ private:
   {
     response->success = map_ready_ && static_cast<bool>(octree_);
     response->message = response->success ? "ok" : "octomap not ready";
+    response->state_revision = state_revision_;
     response->map_id = get_parameter("map_id").as_string();
     response->frame_id = get_parameter("frame_id").as_string();
     response->resolution = octree_ ? octree_->getResolution() : 0.0;
@@ -287,6 +378,7 @@ private:
       get_parameter("preblocked_costmap_radius_cells").as_int();
     response->preblocked_costmap_weight = get_parameter("preblocked_costmap_weight").as_double();
     response->source_world_file = get_parameter("source_world_file").as_string();
+    response->external_preblocked = currentExternalPreblockedMarker();
   }
 
   void handleExportSnapshot(
@@ -296,14 +388,15 @@ private:
     if (!map_ready_ || !octree_) {
       response->success = false;
       response->message = "octomap not ready";
-      response->snapshot_stamp = now();
+      response->snapshot_stamp = nextSnapshotStamp();
+      response->state_revision = state_revision_;
       return;
     }
 
-    if (request->recompute_layers) {
-      rebuildPreblockedCells();
-      rebuildDerivedLayers();
-      rebuildPreblockedCostmap();
+    const builtin_interfaces::msg::Time snapshot_stamp = nextSnapshotStamp();
+    publication_stamp_override_ = snapshot_stamp;
+    if (request->recompute_layers && derived_layers_dirty_) {
+      rebuildAllDerivedLayers();
     } else {
       publishPreblockedCellsMarker();
       publishCellSetMarker(
@@ -311,33 +404,159 @@ private:
         0.55F);
       publishRiskCostCloud();
     }
+    publishCurrentOctomap();
+    publication_stamp_override_.reset();
 
     response->success = true;
     response->message = "snapshot ready";
-    response->snapshot_stamp = now();
+    response->snapshot_stamp = snapshot_stamp;
+    response->state_revision = state_revision_;
+  }
+
+  std::unique_ptr<octomap::OcTree> decodeOctomap(
+    const octomap_msgs::msg::Octomap & msg) const
+  {
+    // msgToMap returns an owning raw AbstractOcTree pointer.  Keep that owner
+    // in a unique_ptr until the dynamic type is verified, otherwise a valid
+    // non-OcTree payload leaks when dynamic_cast returns nullptr.
+    std::unique_ptr<octomap::AbstractOcTree> decoded_tree(octomap_msgs::msgToMap(msg));
+    if (!decoded_tree) {
+      RCLCPP_ERROR(get_logger(), "Failed to convert OctoMap message to OcTree.");
+      return nullptr;
+    }
+    auto * octree = dynamic_cast<octomap::OcTree *>(decoded_tree.get());
+    if (!octree) {
+      RCLCPP_ERROR(get_logger(), "Decoded OctoMap is not an OcTree.");
+      return nullptr;
+    }
+
+    decoded_tree.release();
+    return std::unique_ptr<octomap::OcTree>(octree);
+  }
+
+  void installOctomap(
+    std::unique_ptr<octomap::OcTree> new_tree,
+    const octomap_msgs::msg::Octomap & msg,
+    bool clear_navigation)
+  {
+    const std::uint64_t new_map_hash = hashOctomapMessage(msg);
+    const bool map_content_changed = !map_ready_ || new_map_hash != last_octomap_hash_;
+    octree_ = std::shared_ptr<octomap::OcTree>(std::move(new_tree));
+    map_ready_ = true;
+    last_octomap_hash_ = new_map_hash;
+    updateGridBounds();
+    rebuildOccupiedFineCells();
+    if (clear_navigation) {
+      clearNavigationStateAndPublish(msg.header.frame_id);
+    }
+    if (map_content_changed) {
+      incrementStateRevision();
+    }
+  }
+
+  bool replaceOctomap(
+    const octomap_msgs::msg::Octomap & msg,
+    bool clear_navigation = true)
+  {
+    auto new_tree = decodeOctomap(msg);
+    if (!new_tree) {
+      return false;
+    }
+
+    installOctomap(std::move(new_tree), msg, clear_navigation);
+    rebuildExternalPreblockedCells();
+    return true;
+  }
+
+  void handleApplySnapshot(
+    const std::shared_ptr<jie_map_msgs::srv::ApplyNavigationMapSnapshot::Request> request,
+    std::shared_ptr<jie_map_msgs::srv::ApplyNavigationMapSnapshot::Response> response)
+  {
+    if (request->external_preblocked.type != visualization_msgs::msg::Marker::CUBE_LIST) {
+      response->success = false;
+      response->message = "external preblocked marker is not CUBE_LIST";
+      response->snapshot_stamp = nextSnapshotStamp();
+      return;
+    }
+
+    // Decode first without touching the live map, authored layer, navigation
+    // state, or parameters.  A malformed map therefore cannot partially
+    // apply the rest of the package profile.
+    auto new_tree = decodeOctomap(request->octomap);
+    if (!new_tree) {
+      response->success = false;
+      response->message = "failed to decode OctoMap";
+      response->snapshot_stamp = nextSnapshotStamp();
+      return;
+    }
+
+    try {
+      std::vector<rclcpp::Parameter> planner_parameters;
+      planner_parameters.reserve(request->planner_parameters.size());
+      for (const auto & parameter_msg : request->planner_parameters) {
+        planner_parameters.push_back(rclcpp::Parameter::from_parameter_msg(parameter_msg));
+      }
+      if (!planner_parameters.empty()) {
+        const auto parameter_result = set_parameters_atomically(planner_parameters);
+        if (!parameter_result.successful) {
+          response->success = false;
+          response->message = "failed to apply planner parameters: " + parameter_result.reason;
+          response->snapshot_stamp = nextSnapshotStamp();
+          return;
+        }
+      }
+    } catch (const std::exception & exception) {
+      response->success = false;
+      response->message = std::string("failed to apply planner parameters: ") + exception.what();
+      response->snapshot_stamp = nextSnapshotStamp();
+      return;
+    }
+
+    // No operation below this point can reject the request.  The executor is
+    // single-threaded, so installing the decoded tree and authored marker in
+    // this callback exposes them as one state transition to every subscriber.
+    const std::uint64_t new_external_hash =
+      hashExternalPreblockedMarker(request->external_preblocked);
+    const bool external_content_changed =
+      !has_external_preblocked_marker_ || new_external_hash != last_external_marker_hash_;
+    latest_external_preblocked_marker_ = request->external_preblocked;
+    has_external_preblocked_marker_ = true;
+    last_external_marker_hash_ = new_external_hash;
+    installOctomap(std::move(new_tree), request->octomap, request->clear_navigation);
+    if (external_content_changed) {
+      incrementStateRevision();
+    }
+    rebuildExternalPreblockedCells();
+
+    const builtin_interfaces::msg::Time snapshot_stamp = nextSnapshotStamp();
+    publication_stamp_override_ = snapshot_stamp;
+    rebuildAllDerivedLayers();
+    publishCurrentOctomap();
+    publication_stamp_override_.reset();
+
+    if (!request->clear_navigation && has_start_ && has_goal_) {
+      const bool ok = planAndPublish();
+      if (!ok) {
+        RCLCPP_WARN(get_logger(), "No path found after authored preblocked update.");
+      }
+    }
+
+    response->success = true;
+    response->message = "navigation map snapshot applied";
+    response->snapshot_stamp = snapshot_stamp;
   }
 
   void onOctomap(const octomap_msgs::msg::Octomap::SharedPtr msg)
   {
-    const std::uint64_t map_hash = hashOctomapData(msg->data);
-    if (map_ready_ && map_hash == last_octomap_hash_) {
+    const std::uint64_t map_hash = hashOctomapMessage(*msg);
+    if (map_ready_ && !derived_layers_dirty_ && map_hash == last_octomap_hash_) {
       return;
     }
 
-    octree_.reset(dynamic_cast<octomap::OcTree *>(octomap_msgs::msgToMap(*msg)));
-    if (!octree_) {
-      RCLCPP_ERROR(get_logger(), "Failed to convert OctoMap message to OcTree.");
+    if (!replaceOctomap(*msg)) {
       return;
     }
-    map_ready_ = true;
-    last_octomap_hash_ = map_hash;
-    updateGridBounds();
-    rebuildOccupiedFineCells();
-    rebuildExternalPreblockedCells();
-    clearNavigationStateAndPublish(msg->header.frame_id);
-    rebuildPreblockedCells();
-    rebuildDerivedLayers();
-    rebuildPreblockedCostmap();
+    rebuildAllDerivedLayers();
   }
 
   void onEditedOccupiedMarker(const visualization_msgs::msg::Marker::SharedPtr msg)
@@ -353,7 +572,7 @@ private:
       return;
     }
 
-    auto edited_tree = std::make_shared<octomap::OcTree>(resolution);
+    auto edited_tree = std::make_unique<octomap::OcTree>(resolution);
     for (const auto & point : msg->points) {
       edited_tree->updateNode(
         octomap::point3d(
@@ -362,20 +581,32 @@ private:
     }
     edited_tree->updateInnerOccupancy();
 
-    octree_ = edited_tree;
-    map_ready_ = true;
-    last_octomap_hash_ = 0;
-    updateGridBounds();
-    rebuildOccupiedFineCells();
-    rebuildExternalPreblockedCells();
-    if (!msg->header.frame_id.empty()) {
-      set_parameter(rclcpp::Parameter("frame_id", msg->header.frame_id));
+    const std::string resolved_frame = msg->header.frame_id.empty() ?
+      get_parameter("frame_id").as_string() : msg->header.frame_id;
+    octomap_msgs::msg::Octomap edited_map_msg;
+    edited_map_msg.header.frame_id = resolved_frame;
+    if (!octomap_msgs::fullMapToMsg(*edited_tree, edited_map_msg)) {
+      RCLCPP_ERROR(get_logger(), "Failed to convert edited occupied cells to OctoMap.");
+      return;
+    }
+    const std::uint64_t edited_map_hash = hashOctomapMessage(edited_map_msg);
+    if (map_ready_ && !derived_layers_dirty_ && edited_map_hash == last_octomap_hash_) {
+      return;
     }
 
+    if (resolved_frame != get_parameter("frame_id").as_string()) {
+      const auto frame_result = set_parameter(rclcpp::Parameter("frame_id", resolved_frame));
+      if (!frame_result.successful) {
+        RCLCPP_ERROR(
+          get_logger(), "Failed to apply edited map frame: %s", frame_result.reason.c_str());
+        return;
+      }
+    }
+
+    installOctomap(std::move(edited_tree), edited_map_msg, false);
+    rebuildExternalPreblockedCells();
     publishCurrentOctomap();
-    rebuildPreblockedCells();
-    rebuildDerivedLayers();
-    rebuildPreblockedCostmap();
+    rebuildAllDerivedLayers();
 
     RCLCPP_INFO(
       get_logger(),
@@ -407,6 +638,30 @@ private:
     return sz;
   }
 
+  visualization_msgs::msg::Marker currentExternalPreblockedMarker() const
+  {
+    visualization_msgs::msg::Marker marker;
+    marker.header.stamp = publicationStamp();
+    marker.header.frame_id = get_parameter("frame_id").as_string();
+    marker.ns = "external_preblocked_cells";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.pose.orientation.w = 1.0;
+    const double resolution = octree_ ? octree_->getResolution() : 0.0;
+    marker.scale.x = resolution;
+    marker.scale.y = resolution;
+    marker.scale.z = resolution;
+    marker.color.r = 0.95F;
+    marker.color.g = 0.10F;
+    marker.color.b = 0.10F;
+    marker.color.a = 0.95F;
+    if (has_external_preblocked_marker_) {
+      marker.points = latest_external_preblocked_marker_.points;
+    }
+    return marker;
+  }
+
   void publishCurrentOctomap()
   {
     if (!octree_ || !octomap_pub_) {
@@ -414,13 +669,44 @@ private:
     }
 
     octomap_msgs::msg::Octomap msg;
-    msg.header.stamp = now();
+    msg.header.stamp = publicationStamp();
     msg.header.frame_id = get_parameter("frame_id").as_string();
     if (!octomap_msgs::fullMapToMsg(*octree_, msg)) {
       RCLCPP_WARN(get_logger(), "Failed to publish edited OctoMap message.");
       return;
     }
+    // This node subscribes to the same transient-local topic. Record the
+    // serialized content before publishing so the self-echo is ignored; the
+    // edited tree and all derived layers are already rebuilt in this callback.
+    last_octomap_hash_ = hashOctomapMessage(msg);
     octomap_pub_->publish(msg);
+  }
+
+  builtin_interfaces::msg::Time publicationStamp() const
+  {
+    if (publication_stamp_override_) {
+      return *publication_stamp_override_;
+    }
+    return now();
+  }
+
+  builtin_interfaces::msg::Time nextSnapshotStamp()
+  {
+    const auto current_time = now();
+    std::int64_t stamp_nanoseconds = current_time.nanoseconds();
+    if (last_snapshot_stamp_nanoseconds_ &&
+      stamp_nanoseconds <= *last_snapshot_stamp_nanoseconds_)
+    {
+      stamp_nanoseconds = *last_snapshot_stamp_nanoseconds_ + 1;
+    }
+    last_snapshot_stamp_nanoseconds_ = stamp_nanoseconds;
+    return static_cast<builtin_interfaces::msg::Time>(
+      rclcpp::Time(stamp_nanoseconds, current_time.get_clock_type()));
+  }
+
+  void incrementStateRevision()
+  {
+    ++state_revision_;
   }
 
   void onStart(const geometry_msgs::msg::PointStamped::SharedPtr msg)
@@ -768,8 +1054,19 @@ private:
     // Keep the metric marker, not only grid indices. A load may deliver this
     // topic just before its OctoMap; re-quantizing the saved metric points in
     // onOctomap makes cross-topic ordering and resolution changes safe.
+    const std::uint64_t marker_hash = hashExternalPreblockedMarker(*msg);
+    const bool external_content_changed =
+      !has_external_preblocked_marker_ || marker_hash != last_external_marker_hash_;
+    if (!external_content_changed && !derived_layers_dirty_) {
+      return;
+    }
     latest_external_preblocked_marker_ = *msg;
     has_external_preblocked_marker_ = true;
+    last_external_marker_hash_ = marker_hash;
+    if (external_content_changed) {
+      incrementStateRevision();
+    }
+    derived_layers_dirty_ = true;
     rebuildExternalPreblockedCells();
 
     RCLCPP_INFO(
@@ -781,9 +1078,7 @@ private:
       return;
     }
 
-    rebuildPreblockedCells();
-    rebuildDerivedLayers();
-    rebuildPreblockedCostmap();
+    rebuildAllDerivedLayers();
 
     if (map_ready_ && has_start_ && has_goal_) {
       const bool ok = planAndPublish();
@@ -801,6 +1096,7 @@ private:
     }
     const bool enable = get_parameter("enable_preblocked_costmap").as_bool();
     if (!enable) {
+      publishRiskCostCloud();
       return;
     }
 
@@ -847,6 +1143,15 @@ private:
     publishRiskCostCloud();
   }
 
+  void rebuildAllDerivedLayers()
+  {
+    derived_layers_dirty_ = true;
+    rebuildPreblockedCells();
+    rebuildDerivedLayers();
+    rebuildPreblockedCostmap();
+    derived_layers_dirty_ = false;
+  }
+
   double getPreblockedCost(const GridIndex & idx) const
   {
     const auto it = preblocked_costmap_.find(idx);
@@ -866,7 +1171,7 @@ private:
     }
 
     visualization_msgs::msg::Marker marker;
-    marker.header.stamp = now();
+    marker.header.stamp = publicationStamp();
     marker.header.frame_id = get_parameter("frame_id").as_string();
     marker.ns = ns;
     marker.id = 0;
@@ -906,7 +1211,7 @@ private:
     }
 
     sensor_msgs::msg::PointCloud2 cloud_msg;
-    cloud_msg.header.stamp = now();
+    cloud_msg.header.stamp = publicationStamp();
     cloud_msg.header.frame_id = get_parameter("frame_id").as_string();
 
     sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
@@ -1365,6 +1670,7 @@ private:
   }
 
   bool map_ready_;
+  bool derived_layers_dirty_{true};
   bool has_start_;
   bool has_goal_;
   bool has_goal_pose_{false};
@@ -1383,6 +1689,10 @@ private:
   visualization_msgs::msg::Marker latest_external_preblocked_marker_;
   bool has_external_preblocked_marker_{false};
   std::uint64_t last_octomap_hash_{0};
+  std::uint64_t last_external_marker_hash_{0};
+  std::uint64_t state_revision_{0};
+  std::optional<builtin_interfaces::msg::Time> publication_stamp_override_;
+  std::optional<std::int64_t> last_snapshot_stamp_nanoseconds_;
   GridIndex minimum_grid_{0, 0, 0};
   GridIndex maximum_grid_{0, 0, 0};
   int minimum_grid_z_{0};
@@ -1402,6 +1712,8 @@ private:
   rclcpp::Service<jie_map_msgs::srv::GetNavigationMapMeta>::SharedPtr get_meta_srv_;
   rclcpp::Service<jie_map_msgs::srv::ExportNavigationSnapshot>::SharedPtr
     export_snapshot_srv_;
+  rclcpp::Service<jie_map_msgs::srv::ApplyNavigationMapSnapshot>::SharedPtr
+    apply_snapshot_srv_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
     parameter_callback_handle_;
 };

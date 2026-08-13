@@ -13,6 +13,9 @@
   <!-- Geometry profile inputs.  The RMUC launch supplies a lower wheel and
        sensor installation so the collision model matches the field tunnel;
        legacy tutorial worlds retain these original defaults. -->
+  <xacro:arg name="body_height" default="0.15"/>
+  <xacro:arg name="body_length" default="0.38"/>
+  <xacro:arg name="body_width" default="0.32"/>
   <xacro:arg name="wheel_radius" default="0.125"/>
   <xacro:arg name="laser2d_mount_z" default="0.125"/>
   <xacro:arg name="laser3d_mount_z" default="0.475"/>
@@ -28,9 +31,9 @@
   
   <xacro:property name="imu_stdev" value="0.0001" />
   
-  <xacro:property name="body_height" value="0.1"/>
-  <xacro:property name="body_length" value="0.32"/>
-  <xacro:property name="body_width" value="0.26"/>
+  <xacro:property name="body_height" value="$(arg body_height)"/>
+  <xacro:property name="body_length" value="$(arg body_length)"/>
+  <xacro:property name="body_width" value="$(arg body_width)"/>
   
   <xacro:property name="axis_front" value="0.14"/>
   <xacro:property name="axis_back" value="-0.14"/>

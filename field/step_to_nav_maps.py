@@ -29,6 +29,13 @@ from OCP.TopoDS import TopoDS
 
 import trimesh
 
+from conversion_metadata import (
+    load_json_object,
+    merge_conversion_root,
+    sha256_file,
+    write_json_object,
+)
+
 
 def log(message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
@@ -324,6 +331,11 @@ def write_gazebo_world(output_dir: Path, model_name: str) -> None:
 
 
 def convert(args) -> None:
+    metadata_path = args.output / "conversion_metadata.json"
+    # Read provenance before touching any generated geometry.  A malformed
+    # metadata file must fail early instead of leaving a half-updated tree.
+    previous_metadata = load_json_object(metadata_path)
+    source_step_sha256 = sha256_file(args.step)
     shape, roots, transferred = read_step(args.step)
     source_bounds = shape_bounds(shape)
     vertices_mm, faces, skipped = tessellate_shape(
@@ -408,6 +420,7 @@ def convert(args) -> None:
 
     metadata = {
         "source_step": str(args.step.resolve()),
+        "source_step_sha256": source_step_sha256,
         "source_unit": "millimetre",
         "output_unit": "metre",
         "scale_applied": 0.001,
@@ -438,10 +451,11 @@ def convert(args) -> None:
             "build_jie_surface_pcd.py on *_collision.stl to create the canonical JIE PCD."
         ),
     }
-    metadata_path = output / "conversion_metadata.json"
-    metadata_path.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    # ``convert`` does not replace the canonical PLY/PCD.  Preserve their
+    # downstream provenance only when the source STEP bytes are unchanged;
+    # otherwise those builders must recreate and revalidate their artifacts.
+    metadata = merge_conversion_root(previous_metadata, metadata)
+    write_json_object(metadata_path, metadata)
     log(f"Conversion completed; metadata: {metadata_path}")
 
 

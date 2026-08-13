@@ -14,6 +14,7 @@ from PIL import Image
 from geometry_msgs.msg import Point, Quaternion
 from nav_msgs.msg import OccupancyGrid
 from jie_map_msgs.srv import SaveNavigationMapPackage
+from jie_octomap.map_package_schema import MAP_PACKAGE_SAVE_TIMEOUT_SEC
 from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
@@ -107,7 +108,12 @@ class RosMapImportNode(Node):
             "traversable": self._latest_traversable,
         }
 
-    def save_package(self, package_path: str, overwrite: bool, timeout_sec: float = 10.0):
+    def save_package(
+        self,
+        package_path: str,
+        overwrite: bool,
+        timeout_sec: float = MAP_PACKAGE_SAVE_TIMEOUT_SEC,
+    ):
         if not self.save_client.wait_for_service(timeout_sec=2.0):
             return False, "保存服务 /map_package_manager/save_package 不可用。"
 
@@ -162,6 +168,8 @@ class RosMapImportWindow(QWidget):
         self._selected_yaml: Path | None = None
         self._last_grid: OccupancyGrid | None = None
         self._worker_thread: threading.Thread | None = None
+        self._worker: SaveWorker | None = None
+        self._save_in_progress = False
         self._ros_node = RosMapImportNode()
         self._renderer = vtk.vtkRenderer()
         self._layer_actors: dict[str, tuple[vtk.vtkActor, vtk.vtkActor]] = {}
@@ -220,9 +228,9 @@ class RosMapImportWindow(QWidget):
         self.overwrite_checkbox.setChecked(True)
         save_form.addRow("", self.overwrite_checkbox)
 
-        save_btn = QPushButton("保存Octomap地图")
-        save_btn.clicked.connect(self._save_package)
-        save_form.addRow("", save_btn)
+        self.save_btn = QPushButton("保存Octomap地图")
+        self.save_btn.clicked.connect(self._save_package)
+        save_form.addRow("", self.save_btn)
         save_group.setLayout(save_form)
 
         import_btn = QPushButton("导入二维地图")
@@ -379,6 +387,10 @@ class RosMapImportWindow(QWidget):
         return Path(root_dir).expanduser() / map_name
 
     def _save_package(self) -> None:
+        if self._save_in_progress or (
+            self._worker_thread is not None and self._worker_thread.is_alive()
+        ):
+            return
         if self._last_grid is None:
             QMessageBox.warning(self, "地图包保存", "请先导入二维地图。")
             return
@@ -387,8 +399,10 @@ class RosMapImportWindow(QWidget):
         if package_path is None:
             return
 
+        overwrite = self.overwrite_checkbox.isChecked()
+        self._set_save_busy(True)
         self.status_label.setText(f"正在保存地图包到 {package_path} ，请稍候。")
-        worker = SaveWorker(str(package_path), self.overwrite_checkbox.isChecked())
+        worker = SaveWorker(str(package_path), overwrite)
         worker.finished.connect(self._on_save_finished)
         thread = threading.Thread(target=worker.run, daemon=True)
         self._worker_thread = thread
@@ -396,11 +410,21 @@ class RosMapImportWindow(QWidget):
         thread.start()
 
     def _on_save_finished(self, success: bool, message: str) -> None:
+        self._worker_thread = None
+        self._worker = None
+        self._set_save_busy(False)
         self.status_label.setText(message)
         if success:
             QMessageBox.information(self, "地图包保存", "地图包保存成功。")
         else:
             QMessageBox.critical(self, "地图包保存", message)
+
+    def _set_save_busy(self, busy: bool) -> None:
+        self._save_in_progress = busy
+        self.root_edit.setEnabled(not busy)
+        self.name_edit.setEnabled(not busy)
+        self.overwrite_checkbox.setEnabled(not busy)
+        self.save_btn.setEnabled(not busy)
 
     def _make_ground_grid(self, size: float, step: float) -> vtk.vtkActor:
         append = vtk.vtkAppendPolyData()
