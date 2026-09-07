@@ -364,13 +364,13 @@ class PcdMapImportWindow(QWidget):
 
         self.resolution_spin = QDoubleSpinBox()
         self.resolution_spin.setDecimals(3)
-        self.resolution_spin.setRange(0.01, 0.05 if self._rmuc2026_profile else 5.0)
-        self.resolution_spin.setSingleStep(0.05)
+        self.resolution_spin.setRange(0.01, 0.04 if self._rmuc2026_profile else 5.0)
+        self.resolution_spin.setSingleStep(0.01 if self._rmuc2026_profile else 0.05)
         initial_resolution = float(
             self._ros_node.get_parameter("initial_resolution").value
         )
         self.resolution_spin.setValue(
-            min(initial_resolution, 0.05) if self._rmuc2026_profile else initial_resolution
+            min(initial_resolution, 0.04) if self._rmuc2026_profile else initial_resolution
         )
         import_form.addRow("Octomap分辨率", self.resolution_spin)
 
@@ -750,11 +750,11 @@ class PcdMapImportWindow(QWidget):
             QMessageBox.critical(self, "Octomap 转换", f"写入处理后点云失败：{exc}")
             return
         resolution = float(self.resolution_spin.value())
-        if self._rmuc2026_profile and resolution > 0.05 + 1.0e-12:
+        if self._rmuc2026_profile and resolution > 0.04 + 1.0e-12:
             QMessageBox.critical(
                 self,
                 "Octomap 转换",
-                "RMUC2026 低隧道必须使用不大于 0.05m 的分辨率。",
+                "新版 RMUC2026 地图请使用 0.04m 分辨率。",
             )
             return
         min_points = int(self.min_points_spin.value())
@@ -1030,7 +1030,7 @@ class PcdMapImportWindow(QWidget):
 
         resolution, estimated_voxels = self._choose_octomap_resolution(points, median_nn)
         if self._rmuc2026_profile:
-            resolution = min(resolution, 0.05)
+            resolution = min(resolution, 0.04)
             estimated_voxels = self._estimate_voxel_count(points, resolution)
         self.resolution_spin.setValue(resolution)
         self.min_points_spin.setValue(1)
@@ -1038,7 +1038,7 @@ class PcdMapImportWindow(QWidget):
 
         extent = np.ptp(points, axis=0)
         profile_note = (
-            "RMUC2026 专用配置已锁定分辨率上限 0.05m 且禁用预降采样。"
+            "RMUC2026 专用配置已锁定分辨率上限 0.04m 且禁用预降采样。"
             if self._rmuc2026_profile
             else ""
         )

@@ -33,11 +33,11 @@ EXPECTED = {
     "visual_sha256": "af971f460ffc9327f35344abeb0840103382c5645fb884ca77fc4c559900af26",
     "collision_sha256": "0724d1375ead2e5739ffb12a841afaffb0e0240be466051203cf483d1fb6704c",
     "ply_sha256": "2dd79f2dbc501ad92a4e2f544789cb27e18802c6c9c794d3503dbab5d30ad065",
-    "pcd_sha256": "ba548bd9fde09f65278f9f3117e9e8cd93079eb2025769d9cd169dcf8455de44",
+    "pcd_sha256": "759e6b8c6e77161d0de5b151db2a17f8cad5d1c48df63676f380832858aa5fbe",
     "collision_faces": 499999,
     "ply_vertices": 180417,
     "ply_faces": 348297,
-    "pcd_points": 391226,
+    "pcd_points": 631564,
 }
 
 
@@ -224,8 +224,8 @@ def main() -> int:
     audit.check(int(pcd_values.get("POINTS", -1)) == EXPECTED["pcd_points"], "PCD 点数")
     audit.check(pcd_values.get("DATA") == "binary", "PCD 数据为 binary")
     audit.check(
-        pcd_xyz_are_cell_centres(pcd, 0.05),
-        "PCD 实际 float32 坐标位于 0.05 m 体素中心",
+        pcd_xyz_are_cell_centres(pcd, 0.04),
+        "PCD 实际 float32 坐标位于 0.04 m 体素中心",
     )
 
     surface_report_path = FIELD / "jie_nav" / "rmuc2026_field.surface.json"
@@ -235,8 +235,8 @@ def main() -> int:
     if surface_report_path.is_file():
         surface_report = json.loads(surface_report_path.read_text(encoding="utf-8"))
         audit.check(
-            surface_report.get("source_sha256") == hashes["collision"],
-            "JIE PCD 源为 canonical collision STL",
+            surface_report.get("source_sha256") == hashes["visual"],
+            "JIE PCD 源为完整 STEP 导出 visual STL",
         )
         audit.check(
             surface_report.get("output_sha256") == EXPECTED["pcd_sha256"],
@@ -247,14 +247,14 @@ def main() -> int:
             "JIE 表面栅格报告点数",
         )
         audit.check(
-            surface_report.get("surface_voxel_m") == 0.05
-            and surface_report.get("subdivision_edge_factor") == 1.1,
-            "JIE 表面采样间距与细分参数",
+            surface_report.get("surface_voxel_m") == 0.04
+            and surface_report.get("rasterizer") == "triangle-box",
+            "JIE 4cm 精确三角面/体素相交",
         )
         audit.check(
             surface_report.get("output_coordinate_policy")
-            == "(nearest_lattice_key + 0.5) * surface_voxel_m",
-            "JIE PCD 使用稳定体素中心量化",
+            == "(floor(surface_xyz / pitch) + 0.5) * pitch",
+            "JIE PCD 按真实表面所在格量化，无半格坐标偏移",
         )
         audit.check(
             surface_report.get("z_band_m") == [-0.08, 0.9],
@@ -264,7 +264,7 @@ def main() -> int:
         tunnel_report = json.loads(tunnel_report_path.read_text(encoding="utf-8"))
         tunnel_checks = tunnel_report.get("checks", [])
         audit.check(
-            tunnel_report.get("resolution_m") == 0.05
+            tunnel_report.get("resolution_m") == 0.04
             and tunnel_report.get("robot_radius_xy_m") == 0.28
             and tunnel_report.get("robot_physical_height_m") == 0.225,
             "JIE 双隧道回归使用 RMUC 物理包络",
@@ -276,7 +276,7 @@ def main() -> int:
             "JIE 正负 Y 真隧道在低层连通",
         )
         audit.check(
-            all(check.get("path_z_range_m") == [0.07500000000000001] * 2 for check in tunnel_checks),
+            all(check.get("path_z_range_m") == [0.06] * 2 for check in tunnel_checks),
             "JIE 离线路径未误走隧道屋顶",
         )
 
@@ -382,7 +382,7 @@ def main() -> int:
     )
     audit.check(
         jie_metadata.get("occupancy_semantics")
-        == "deterministic collision-surface obstacle samples; never the Mesh navigation PLY",
+        == "deterministic source-surface occupied cells; never the Mesh navigation PLY",
         "metadata 区分 JIE 占据 PCD 与 Mesh 可通行 PLY",
     )
     physics_validation = metadata.get("gazebo_collision_postprocess", {}).get(
@@ -588,7 +588,7 @@ def main() -> int:
     height_argument = launch_argument_block(jie_import_launch, "robot_height")
     gui_argument = launch_argument_block(jie_import_launch, "start_import_gui")
     audit.check(
-        "'0.05' if '" in resolution_argument
+        "'0.04' if '" in resolution_argument
         and "rmuc2026_profile" in resolution_argument
         and "'0.28' if '" in radius_argument
         and "rmuc2026_profile" in radius_argument
@@ -600,7 +600,7 @@ def main() -> int:
         in jie_import_launch
         and '"robot_height": ParameterValue(robot_height, value_type=float)'
         in jie_import_launch,
-        "JIE RMUC profile 显式传入 0.05/0.28/0.225",
+        "JIE RMUC profile 显式传入 0.04/0.28/0.225",
     )
     audit.check(
         'default_value="true"' in gui_argument

@@ -48,10 +48,18 @@ struct GridIndexHash
 {
   std::size_t operator()(const GridIndex & k) const
   {
-    const std::size_t h1 = std::hash<int>{}(k.x);
-    const std::size_t h2 = std::hash<int>{}(k.y);
-    const std::size_t h3 = std::hash<int>{}(k.z);
-    return h1 ^ (h2 << 1) ^ (h3 << 2);
+    // Small signed grid coordinates must be mixed before combining them.
+    // Plain x ^ (y << 1) ^ (z << 2) collapses hundreds of thousands of
+    // terrain cells into about 2,000 hashes, making map rebuilds quadratic.
+    std::uint64_t hash = 0;
+    for (const int value : {k.x, k.y, k.z}) {
+      std::uint64_t mixed = static_cast<std::uint32_t>(value) +
+        hash + UINT64_C(0x9e3779b97f4a7c15);
+      mixed = (mixed ^ (mixed >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+      mixed = (mixed ^ (mixed >> 27)) * UINT64_C(0x94d049bb133111eb);
+      hash = mixed ^ (mixed >> 31);
+    }
+    return static_cast<std::size_t>(hash);
   }
 };
 

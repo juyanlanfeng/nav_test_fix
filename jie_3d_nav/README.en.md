@@ -205,7 +205,7 @@ JIE can now model horizontal footprint and upward clearance independently:
 - the current RMUC Ceres simulation proxy recommends `robot_radius_xy:=0.28` and `robot_height:=0.225` (these are not unverified real-robot test limits). Its tuned outer-wheel half-width is approximately 0.245 m, so 0.28 m includes horizontal margin; it remains a yaw-independent cylindrical approximation rather than an exact rectangular footprint for every orientation;
 - legacy configurations may continue to set only `robot_radius`. When both new parameters are unset (or non-positive), the planner preserves the original hemispherical test. If only one new parameter is set, the other axis falls back to `robot_radius`.
 
-Generic imports retain the original `0.5 m` default. `rmuc2026_profile:=true` is an explicit field-specific profile: it selects a `0.05 m` resolution, zero preprocessing downsampling, a 0.28 m XY envelope and a 0.225 m physical height, and caps the GUI recommendation at 0.05 m. The approximately 0.246 m RMUC clearance cannot be represented reliably by a 0.1 m OctoMap; 0.1 m correctly rejects the true tunnels.
+Generic imports retain the `0.5 m` default. The revised `rmuc2026_profile:=true` selects `0.04 m`, zero preprocessing downsampling, a 0.28 m XY envelope and a 0.225 m physical height; the GUI recommendation is capped at 0.04 m. The 2026-09-06 map has 631,564 cells, corrects the former half-cell offset, and uses exact triangle/voxel intersection. Reload the new PCD after restarting the GUI. See the [map audit](../doc/MAP_AUDIT_20260906.md).
 
 The PCD GUI requires the system Open3D package:
 

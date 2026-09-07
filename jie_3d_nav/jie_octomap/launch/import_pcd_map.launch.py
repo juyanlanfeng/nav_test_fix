@@ -147,14 +147,14 @@ def generate_launch_description():
                 default_value="false",
                 choices=["true", "false"],
                 description=(
-                    "Use the CAD-derived RMUC simulation proxy: 0.05 m OctoMap, "
+                    "Use the CAD-derived RMUC simulation proxy: 0.04 m OctoMap, "
                     "0.28 m XY radius and 0.225 m physical height."
                 ),
             ),
             DeclareLaunchArgument(
                 "resolution",
                 default_value=PythonExpression(
-                    ["'0.05' if '", rmuc2026_profile, "' == 'true' else '0.5'"]
+                    ["'0.04' if '", rmuc2026_profile, "' == 'true' else '0.5'"]
                 ),
                 description="OctoMap resolution in meters for imported PCD maps.",
             ),

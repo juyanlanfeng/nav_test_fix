@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -70,11 +72,23 @@ private:
       if (!oc_tree->isNodeOccupied(*it)) {
         continue;
       }
-      geometry_msgs::msg::Point point;
-      point.x = it.getX();
-      point.y = it.getY();
-      point.z = it.getZ();
-      marker.points.push_back(point);
+      // CUBE_LIST has one shared scale. A pruned leaf may be larger than
+      // that scale: emit all covered fine cells, rather than shrinking it
+      // to one cube and creating artificial holes in the displayed surface.
+      const double resolution = oc_tree->getResolution();
+      const int side = std::max(1, static_cast<int>(std::llround(it.getSize() / resolution)));
+      const double offset = 0.5 * (resolution - it.getSize());
+      for (int dx = 0; dx < side; ++dx) {
+        for (int dy = 0; dy < side; ++dy) {
+          for (int dz = 0; dz < side; ++dz) {
+            geometry_msgs::msg::Point point;
+            point.x = it.getX() + offset + dx * resolution;
+            point.y = it.getY() + offset + dy * resolution;
+            point.z = it.getZ() + offset + dz * resolution;
+            marker.points.push_back(point);
+          }
+        }
+      }
     }
 
     marker_pub_->publish(marker);
