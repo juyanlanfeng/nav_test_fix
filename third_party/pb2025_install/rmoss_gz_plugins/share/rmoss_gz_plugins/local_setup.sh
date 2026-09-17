@@ -1,0 +1,1 @@
+/home/rainple/nav_test/third_party/pb2025_build/rmoss_gz_plugins/ament_cmake_environment_hooks/local_setup.sh

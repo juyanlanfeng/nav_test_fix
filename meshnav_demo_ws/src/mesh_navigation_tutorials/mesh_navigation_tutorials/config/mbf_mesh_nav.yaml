@@ -13,6 +13,12 @@ move_base_flex:
       type: 'cvp_mesh_planner/CVPMeshPlanner'
       cost_limit: 0.99 # Vertices with costs higher than this value will be avoided. Has to be set *below* the inflation layer inscribed value to avoid obstacles in planning
       publish_vector_field: true
+      # Path sampling.  The default (0.4 m) is coarser than the free band of the
+      # RMUC tunnels (~0.3 m), so the published polyline weaves across the
+      # corridor and its last segment points sideways; the controller then asks
+      # the body for a large heading change right at the tunnel mouth, where the
+      # tunnel wall leaves no room (doc section 9.5).
+      step_width: 0.05
 
     planner_patience: 10.0
     planner_max_retries: 2
@@ -27,8 +33,14 @@ move_base_flex:
     controller_patience: 2.0
     controller_max_retries: 4
     dist_tolerance: 0.2
-    angle_tolerance: 0.8
-    cmd_vel_ignored_tolerance: 10.0
+    # Low-vehicle tolerances: the vehicle is small enough to drive the RMUC
+    # tunnels, and its final in-place alignment there must not stop 46 deg off the
+    # corridor axis - that is what put the rear wheel of the first negative-Y run
+    # onto the 4-7 cm wall base plate (see doc section 9.5).  The rotation itself
+    # is slow because the mesh controller scales its speed with the local cost, so
+    # the "robot ignored velocity commands" watchdog is raised as well.
+    angle_tolerance: 0.35
+    cmd_vel_ignored_tolerance: 25.0
 
     mesh_map:
       # input

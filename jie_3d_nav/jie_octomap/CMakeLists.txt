@@ -69,6 +69,8 @@ add_executable(rviz_click_selector_node src/rviz_click_selector_node.cpp)
 ament_target_dependencies(rviz_click_selector_node
   rclcpp
   geometry_msgs
+  nav_msgs
+  std_msgs
   visualization_msgs
 )
 

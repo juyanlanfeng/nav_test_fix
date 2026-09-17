@@ -16,6 +16,7 @@ find_package(mbf_utility REQUIRED)
 find_package(mesh_map REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(lvr2 REQUIRED)
 find_package(MPI)
 
@@ -27,7 +28,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_compile_definitions(${PROJECT_NAME} PRIVATE "MESH_CONTROLLER_BUILDING_LIBRARY")
-ament_target_dependencies(${PROJECT_NAME} example_interfaces mbf_mesh_core mbf_msgs mbf_utility mesh_map rclcpp tf2_geometry_msgs)
+ament_target_dependencies(${PROJECT_NAME} example_interfaces mbf_mesh_core mbf_msgs mbf_utility mesh_map rclcpp tf2_geometry_msgs visualization_msgs)
 target_link_libraries(${PROJECT_NAME} 
     lvr2::lvr2
     ${MPI_CXX_LIBRARIES}
@@ -44,5 +45,5 @@ install(TARGETS ${PROJECT_NAME}
 ament_export_include_directories(include)
 ament_export_libraries(${PROJECT_NAME})
 ament_export_targets(export_${PROJECT_NAME})
-ament_export_dependencies(example_interfaces mbf_mesh_core mbf_msgs mbf_utility mesh_map rclcpp tf2_geometry_msgs)
+ament_export_dependencies(example_interfaces mbf_mesh_core mbf_msgs mbf_utility mesh_map rclcpp tf2_geometry_msgs visualization_msgs)
 ament_package()

@@ -1,0 +1,28 @@
+# Smoke goals for the PB three-framework simulation.
+#
+# Map-frame metres.  The goal is a short move on the flat ground next to the
+# spawn point.  It was verified against the generated DDDMR map bundle, not
+# guessed: it is a mapground node with 0.97 m clearance to the nearest
+# mapcloud (obstacle) point, it sits in the same connected component as the
+# spawn node at the 0.12 m graph radius (the planner's own lethal radius is
+# 0.5 m), and the straight line from the spawn keeps >= 0.55 m clearance.
+#
+# The earlier (-10.5, -4.4) goal was replaced: that point is only 0.06 m from
+# the field wall at x = -10.5, so DDDMR correctly classified it as lethal and
+# MeshNav/JIE would have to squeeze past the same wall.
+#
+# Ramp/tunnel cases are separate acceptance items.  Re-measure after any map or
+# spawn change and confirm with pb_preflight before a run.
+default:
+  start: {x: -11.9, y: -4.4, z: 0.0434}
+  goal: {x: -12.647, y: -3.698, z: 0.062, yaw: 0.0}
+
+meshnav:
+  goal: {x: -12.647, y: -3.698, z: 0.062, yaw: 0.0}
+
+jie:
+  # JIE's start comes from the live TF, not from this file.
+  goal: {x: -12.647, y: -3.698, z: 0.062, yaw: 0.0}
+
+dddmr:
+  goal: {x: -12.647, y: -3.698, z: 0.062, yaw: 0.0}

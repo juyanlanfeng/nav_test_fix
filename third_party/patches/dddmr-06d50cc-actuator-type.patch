@@ -1,0 +1,44 @@
+diff --git a/src/dddmr_local_planner/base_trajectory/include/base_trajectory/trajectory.h b/src/dddmr_local_planner/base_trajectory/include/base_trajectory/trajectory.h
+index eafe043..e2b84f0 100644
+--- a/src/dddmr_local_planner/base_trajectory/include/base_trajectory/trajectory.h
++++ b/src/dddmr_local_planner/base_trajectory/include/base_trajectory/trajectory.h
+@@ -64,7 +64,9 @@ namespace base_trajectory {
+ 
+       double xv_, yv_, thetav_, steering_angle_, steering_angle_velocity_;
+       
+-      dddmr_sys_core::ActuatorType actuator_type_;
++      //@PB: default-initialised; an indeterminate value made
++      //@PB: P2PMoveBase::publishVelocity() drop the command silently.
++      dddmr_sys_core::ActuatorType actuator_type_ = dddmr_sys_core::ActuatorType::MOTOR;
+ 
+       double cost_; ///< @brief The cost/score of the trajectory
+ 
+diff --git a/src/dddmr_local_planner/trajectory_generators/include/trajectory_generators/trajectory_generator_theory.h b/src/dddmr_local_planner/trajectory_generators/include/trajectory_generators/trajectory_generator_theory.h
+index 3d0e662..4516b27 100644
+--- a/src/dddmr_local_planner/trajectory_generators/include/trajectory_generators/trajectory_generator_theory.h
++++ b/src/dddmr_local_planner/trajectory_generators/include/trajectory_generators/trajectory_generator_theory.h
+@@ -74,7 +74,9 @@ class TrajectoryGeneratorTheory{
+     virtual void configurateActuatorType() = 0;
+     std::shared_ptr<trajectory_generators::TrajectoryGeneratorSharedData> shared_data_;
+     std::string name_;
+-    dddmr_sys_core::ActuatorType actuator_type_;
++    //@PB: default-initialised so a missing configurateActuatorType() call cannot
++    //@PB: leave an indeterminate actuator type on the generated trajectories.
++    dddmr_sys_core::ActuatorType actuator_type_ = dddmr_sys_core::ActuatorType::MOTOR;
+ 
+ };
+ 
+diff --git a/src/dddmr_local_planner/trajectory_generators/src/trajectory_generator_theory.cpp b/src/dddmr_local_planner/trajectory_generators/src/trajectory_generator_theory.cpp
+index 809e072..b7224b5 100644
+--- a/src/dddmr_local_planner/trajectory_generators/src/trajectory_generator_theory.cpp
++++ b/src/dddmr_local_planner/trajectory_generators/src/trajectory_generator_theory.cpp
+@@ -41,6 +41,9 @@ void TrajectoryGeneratorTheory::initialize(const std::string name, const rclcpp:
+   name_ = name;
+   node_ = weak_node.lock();
+   onInitialize();
++  //@PB: upstream never invoked this hook, so actuator_type_ stayed indeterminate
++  //@PB: and P2PMoveBase::publishVelocity() discarded every trajectory.
++  configurateActuatorType();
+ }
+ 
+ void TrajectoryGeneratorTheory::setSharedData(std::shared_ptr<trajectory_generators::TrajectoryGeneratorSharedData> shared_data){

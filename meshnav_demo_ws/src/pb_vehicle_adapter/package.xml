@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pb_vehicle_adapter</name>
+  <version>0.1.0</version>
+  <description>PolarBear 2025 vehicle adapter for the RMUC2026 MeshNav and JIE simulation stacks.</description>
+  <maintainer email="maintainers@example.invalid">nav_test maintainers</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>ament_index_python</depend>
+  <depend>geometry_msgs</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+  <depend>nav_msgs</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>rclpy</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>ros_gz_bridge</depend>
+  <depend>ros_gz_sim</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <exec_depend>mbf_mesh_nav</exec_depend>
+  <exec_depend>mesh_navigation_tutorials</exec_depend>
+  <exec_depend>mesh_navigation_tutorials_sim</exec_depend>
+  <exec_depend>octo_planner</exec_depend>
+  <exec_depend>jie_octomap</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

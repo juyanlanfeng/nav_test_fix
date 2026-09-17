@@ -1,0 +1,287 @@
+# DDDMR configuration for the PB vehicle on RMUC2026.
+#
+# Derived from dddmr_navigation/src/dddmr_p2p_move_base/config/p2p_wo_mcl.yaml
+# (upstream 06d50cc) with the changes in
+# doc/THREE_PLANNERS_PB_SIM_IMPLEMENTATION.md section 12:
+#   - occupancy2ground section removed (replaced by the /dddmr map publisher)
+#   - use_twist_stamped enabled; main trajectory generator is the Omni generator
+#   - static map topics point at /dddmr/mapcloud and /dddmr/mapground
+#   - robot_base_frame is base_footprint; cuboid comes from the PB collision AABB
+#   - low initial speeds for first acceptance runs
+#
+# Node names match what the executables actually create:
+#   global_planner/global_planner_node -> perception_3d_global, global_planner,
+#                                         dynamic_window_aware_global_planner
+#   p2p_move_base/p2p_move_base_node    -> trajectory_generators, mpc_critics,
+#                                         perception_3d_local, recovery_behaviors,
+#                                         local_planner, global_plan_manager, p2p_move_base
+#
+# The cuboid corners are the measured PB collision AABB
+# (config/pb_vehicle_profile.yaml: collision_aabb_min / collision_aabb_max):
+#   x [-0.2828, 0.2828], y [-0.216607, 0.216607], z [0.000198, 0.226]  (metres,
+#   base_footprint).  Do not maintain a second, different set of dimensions.
+
+p2p_move_base:
+  ros__parameters:
+    use_sim_time: true
+    use_twist_stamped: true
+    # Instance name kept to avoid rewriting every critic/recovery reference; the
+    # plugin below is the Omni generator, not a differential-drive model.
+    main_trajectory_generator: "differential_drive_simple"
+    controller_frequency: 10.0
+    planner_patience: 10.0
+    # p2p_move_base clears its oscillation watchdog only when the robot gains
+    # oscillation_distance metres *or* oscillation_angle radians since the last
+    # reset.  The upstream 5.0 m assumes a ~1 m/s platform: at the PB's 0.2 m/s
+    # it can never cover 5 m inside oscillation_patience (15 s), so every goal
+    # was declared an oscillation and handed to the recovery behaviour.
+    oscillation_distance: 1.0
+    oscillation_angle: 1.0
+    oscillation_patience: 15.0
+    controller_patience: 10.0
+    no_plan_retry_num: 10
+    waiting_patience: 10.0
+
+global_plan_manager:
+  ros__parameters:
+    use_sim_time: true
+    global_planner_action_name: "get_plan"
+    global_plan_query_frequency: -1.0
+
+local_planner:
+  ros__parameters:
+    use_sim_time: true
+    odom_topic: /odom
+    forward_prune: 3.0
+    backward_prune: 1.0
+    heading_tracking_distance: 0.5
+    # Upstream accepts up to 0.5 rad of heading error before handing the robot to
+    # the omnidirectional controller.  In this simulation the mecanum wheels
+    # execute a lateral component far worse than the commanded value, so a 30 deg
+    # residual made the controller strafe instead of following the path and the
+    # robot crept into the oscillation watchdog.  Align tighter first.
+    heading_align_angle: 0.2
+    prune_plane_timeout: 3.0
+    xy_goal_tolerance: 0.3
+    yaw_goal_tolerance: 0.3
+    controller_frequency: 10.0
+    cuboid:
+      flb: [0.2828, 0.216607, 0.000198]
+      frb: [0.2828, -0.216607, 0.000198]
+      flt: [0.2828, 0.216607, 0.226]
+      frt: [0.2828, -0.216607, 0.226]
+      blb: [-0.2828, 0.216607, 0.000198]
+      brb: [-0.2828, -0.216607, 0.000198]
+      blt: [-0.2828, 0.216607, 0.226]
+      brt: [-0.2828, -0.216607, 0.226]
+
+recovery_behaviors:
+  ros__parameters:
+    plugins: ["rotate_inplace", "position_control"]
+    rotate_inplace:
+      plugin: "recovery_behaviors::RotateInPlaceBehavior"
+      frequency: 10.0
+      tolerance: 0.3
+      trajectory_generator_name: "differential_drive_rotate_inplace"
+    position_control:
+      plugin: "recovery_behaviors::PositionControlBehavior"
+      frequency: 10.0
+      yaw_tolerance: 0.05
+      distance_tolerance: 0.02
+      kp_yaw: 2.0
+      ki_yaw: 0.5
+      kp_distance: 8.0
+      ki_distance: 0.5
+      trajectory_generator_name: "one_state_trajectory"
+
+trajectory_generators:
+  ros__parameters:
+    plugins: ["differential_drive_simple", "differential_drive_rotate_inplace", "differential_drive_rotate_shortest_angle", "one_state_trajectory"]
+
+    one_state_trajectory:
+      plugin: "trajectory_generators::OneStateTrajectoryGeneratorTheory"
+      controller_frequency: 10.0
+      sim_time: 1.0
+      cuboid:
+        flb: [0.2828, 0.216607, 0.000198]
+        frb: [0.2828, -0.216607, 0.000198]
+        flt: [0.2828, 0.216607, 0.226]
+        frt: [0.2828, -0.216607, 0.226]
+        blb: [-0.2828, 0.216607, 0.000198]
+        brb: [-0.2828, -0.216607, 0.000198]
+        blt: [-0.2828, 0.216607, 0.226]
+        brt: [-0.2828, -0.216607, 0.226]
+
+    differential_drive_rotate_shortest_angle:
+      plugin: "trajectory_generators::DDRotateInplaceTheory"
+      controller_frequency: 10.0
+      # The alignment generators only sample theta inside
+      # [min_vel_theta, max_vel_theta].  The upstream default of 0.1 rad/s needs
+      # 24 s for a 136 deg turn, which always trips p2p_move_base's 15 s
+      # oscillation watchdog before the robot can start translating, so the
+      # ceiling is raised to the section 12.2 limit of 0.5 rad/s.
+      min_vel_theta: 0.1
+      max_vel_theta: 0.4
+      rotation_speed: 0.4
+      cuboid:
+        flb: [0.2828, 0.216607, 0.000198]
+        frb: [0.2828, -0.216607, 0.000198]
+        flt: [0.2828, 0.216607, 0.226]
+        frt: [0.2828, -0.216607, 0.226]
+        blb: [-0.2828, 0.216607, 0.000198]
+        brb: [-0.2828, -0.216607, 0.000198]
+        blt: [-0.2828, 0.216607, 0.226]
+        brt: [-0.2828, -0.216607, 0.226]
+
+    differential_drive_rotate_inplace:
+      plugin: "trajectory_generators::DDRotateInplaceTheory"
+      controller_frequency: 10.0
+      # Same reasoning as differential_drive_rotate_shortest_angle: the recovery
+      # rotation must finish well inside oscillation_patience (15 s).
+      min_vel_theta: 0.1
+      max_vel_theta: 0.4
+      rotation_speed: 0.4
+      cuboid:
+        flb: [0.2828, 0.216607, 0.000198]
+        frb: [0.2828, -0.216607, 0.000198]
+        flt: [0.2828, 0.216607, 0.226]
+        frt: [0.2828, -0.216607, 0.226]
+        blb: [-0.2828, 0.216607, 0.000198]
+        brb: [-0.2828, -0.216607, 0.000198]
+        blt: [-0.2828, 0.216607, 0.226]
+        brt: [-0.2828, -0.216607, 0.226]
+
+    differential_drive_simple:
+      # NOTE: the instance name is kept for the existing critic/recovery
+      # references, but the plugin is the omnidirectional generator.
+      plugin: "trajectory_generators::OmniSimpleTrajectoryGeneratorTheory"
+      max_vel_x: 0.2
+      min_vel_x: -0.2
+      max_vel_y: 0.2
+      min_vel_y: -0.2
+      max_vel_theta: 0.5
+      min_vel_theta: 0.1
+      min_vel_trans: 0.05
+      max_vel_trans: 0.2
+      acc_lim_x: 1.0
+      acc_lim_y: 1.0
+      acc_lim_theta: 1.5
+      deceleration_ratio: 2.0
+      use_motor_constraint: False
+
+      controller_frequency: 10.0
+      sim_time: 1.0
+      linear_x_sample: 5.0
+      linear_y_sample: 5.0
+      angular_z_sample: 10.0
+      sim_granularity: 0.05
+      angular_sim_granularity: 0.025
+
+      cuboid:
+        flb: [0.2828, 0.216607, 0.000198]
+        frb: [0.2828, -0.216607, 0.000198]
+        flt: [0.2828, 0.216607, 0.226]
+        frt: [0.2828, -0.216607, 0.226]
+        blb: [-0.2828, 0.216607, 0.000198]
+        brb: [-0.2828, -0.216607, 0.000198]
+        blt: [-0.2828, 0.216607, 0.226]
+        brt: [-0.2828, -0.216607, 0.226]
+
+mpc_critics:
+  ros__parameters:
+    plugins: ["collision", "stick_path", "pure_pursuit", "toward_global_plan", "collision_rotate", "collision_rotate_shortest", "prefer_rotate_shortest", "twirling"]
+    collision:
+      plugin: "mpc_critics::CollisionModel"
+      trajectory_generator: differential_drive_simple
+      weight: 1.0
+    stick_path:
+      plugin: "mpc_critics::StickPathModel"
+      trajectory_generator: differential_drive_simple
+      weight: 0.1
+    pure_pursuit:
+      plugin: "mpc_critics::PurePursuitModel"
+      trajectory_generator: differential_drive_simple
+      translation_weight: 1.0
+      orientation_weight: 0.01
+    toward_global_plan:
+      plugin: "mpc_critics::TowardGlobalPlanModel"
+      trajectory_generator: differential_drive_simple
+      weight: 1.0
+    twirling:
+      plugin: "mpc_critics::TwirlingModel"
+      trajectory_generator: differential_drive_simple
+      weight: 1.0
+    collision_rotate:
+      plugin: "mpc_critics::CollisionModel"
+      trajectory_generator: differential_drive_rotate_inplace
+      weight: 1.0
+    collision_rotate_shortest:
+      plugin: "mpc_critics::CollisionModel"
+      trajectory_generator: differential_drive_rotate_shortest_angle
+      weight: 1.0
+    prefer_rotate_shortest:
+      plugin: "mpc_critics::ShortestAngleModel"
+      trajectory_generator: differential_drive_rotate_shortest_angle
+      weight: 1.0
+
+perception_3d_local:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: "map"
+    robot_base_frame: "base_footprint"
+    max_obstacle_distance: 9999.0
+    inscribed_radius: 0.5
+    inflation_descending_rate: 2.0
+    inflation_radius: 1.5
+    sensors_collected_frequency: 10.0
+    plugins: ["map"]
+    map:
+      plugin: "perception_3d::StaticLayer"
+      is_local_planner: true
+      mapping_mode: false
+      map_topic: "/dddmr/mapcloud"
+      ground_topic: "/dddmr/mapground"
+    path_blocked_strategy:
+      plugin: "perception_3d::PathBlockedStrategy"
+      check_radius: 0.3
+
+perception_3d_global:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: "map"
+    robot_base_frame: "base_footprint"
+    max_obstacle_distance: 9999.0
+    inscribed_radius: 0.5
+    inflation_descending_rate: 2.0
+    inflation_radius: 1.5
+    sensors_collected_frequency: 10.0
+    plugins: ["map"]
+    dgraph_publish_frequency: 1.0
+    map:
+      plugin: "perception_3d::StaticLayer"
+      is_local_planner: false
+      use_adaptive_connection: false
+      adaptive_connection_number: 20
+      radius_of_ground_connection: 0.1
+      intensity_search_radius: 1.0
+      intensity_search_punish_weight: 0.1
+      static_imposing_radius: 1.5
+      map_topic: "/dddmr/mapcloud"
+      ground_topic: "/dddmr/mapground"
+      support:
+        mapping_mode: false
+        enable_edge_detection: false
+        generate_static_graph: true
+
+global_planner:
+  ros__parameters:
+    use_sim_time: true
+    turning_weight: 0.1
+    enable_detail_log: false
+    a_star_expanding_radius: 0.5
+
+dynamic_window_aware_global_planner:
+  ros__parameters:
+    use_sim_time: true
+    look_ahead_distance: 2.0
+    recompute_frequency: 10.0

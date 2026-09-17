@@ -185,6 +185,9 @@ def generate_launch_description():
             "obstacle_inscribed_radius": PythonExpression(
                 ['"0.28" if "', map_name, '" == "rmuc2026_field" else "0.4"']
             ),
+            "ramp_corridors_enabled": PythonExpression(
+                ['"true" if "', map_name, '" == "rmuc2026_field" else "false"']
+            ),
         }.items(),
     )
 

@@ -1,7 +1,9 @@
 #include <string>
 
 #include "geometry_msgs/msg/point_stamped.hpp"
+#include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
 class RvizClickSelectorNode : public rclcpp::Node
@@ -20,6 +22,13 @@ public:
     declare_parameter<double>("head_diameter", 0.32);
     declare_parameter<double>("head_length", 0.44);
     declare_parameter<double>("cube_size", 0.20);
+    // Optional one-click workflow: after a GOAL click, wait for the planner's
+    // /planned_path and then send the /start_navigation confirmation that
+    // d1_controller requires (it drops a start command that arrives before a
+    // pending path, so the path is the right trigger).
+    declare_parameter<bool>("auto_start_navigation", false);
+    declare_parameter<std::string>("path_topic", "/planned_path");
+    declare_parameter<std::string>("start_navigation_topic", "/start_navigation");
 
     const auto clicked_topic = get_parameter("clicked_topic").as_string();
     const auto marker_topic = get_parameter("marker_topic").as_string();
@@ -34,6 +43,22 @@ public:
       goal_topic, rclcpp::QoS(1).transient_local().reliable());
     clicked_sub_ = create_subscription<geometry_msgs::msg::PointStamped>(
       clicked_topic, 10, std::bind(&RvizClickSelectorNode::onClickedPoint, this, std::placeholders::_1));
+
+    auto_start_navigation_ = get_parameter("auto_start_navigation").as_bool();
+    if (auto_start_navigation_) {
+      const auto path_topic = get_parameter("path_topic").as_string();
+      const auto start_navigation_topic = get_parameter("start_navigation_topic").as_string();
+      start_navigation_pub_ = create_publisher<std_msgs::msg::Bool>(
+        start_navigation_topic, rclcpp::QoS(1).transient_local().reliable());
+      // Same QoS as d1_controller: reliable, transient local (the planner
+      // latches the last path).
+      path_sub_ = create_subscription<nav_msgs::msg::Path>(
+        path_topic, rclcpp::QoS(1).transient_local().reliable(),
+        std::bind(&RvizClickSelectorNode::onPlannedPath, this, std::placeholders::_1));
+      RCLCPP_INFO(
+        get_logger(), "Auto start enabled: a GOAL click plus %s starts navigation on %s.",
+        path_topic.c_str(), start_navigation_topic.c_str());
+    }
 
     RCLCPP_INFO(
       get_logger(), "rviz_click_selector started. clicked_topic=%s marker_topic=%s",
@@ -57,9 +82,24 @@ private:
         get_logger(), "Set GOAL point: [%.3f, %.3f, %.3f]",
         msg->point.x, msg->point.y, msg->point.z);
       goal_pub_->publish(*msg);
+      awaiting_plan_ = auto_start_navigation_;
     }
     expect_start_ = !expect_start_;
     publishMarkers();
+  }
+
+  void onPlannedPath(const nav_msgs::msg::Path::SharedPtr msg)
+  {
+    if (!awaiting_plan_ || msg->poses.empty()) {
+      return;
+    }
+    awaiting_plan_ = false;
+    std_msgs::msg::Bool start;
+    start.data = true;
+    start_navigation_pub_->publish(start);
+    RCLCPP_INFO(
+      get_logger(), "Auto start: sent /start_navigation after a planned_path with %zu poses.",
+      msg->poses.size());
   }
 
   visualization_msgs::msg::Marker makeArrow(
@@ -137,6 +177,10 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr start_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr goal_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr start_navigation_pub_;
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+  bool auto_start_navigation_{false};
+  bool awaiting_plan_{false};
 };
 
 int main(int argc, char ** argv)

@@ -1,0 +1,241 @@
+{
+	"abstract" : true,
+	"backtrace" : 5,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"find_package",
+			"set_target_properties",
+			"__find_dependency_common",
+			"find_dependency"
+		],
+		"files" : 
+		[
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-sensors6/ignition-sensors6-config.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-gazebo6/ignition-gazebo6-config.cmake",
+			"CMakeLists.txt",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-sensors6-thermal_camera/ignition-sensors6-thermal_camera-config.cmake",
+			"/usr/local/share/cmake-4.4/Modules/CMakeFindDependencyMacro.cmake"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 2
+			},
+			{
+				"command" : 1,
+				"file" : 2,
+				"line" : 17,
+				"parent" : 0
+			},
+			{
+				"file" : 1,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 102,
+				"parent" : 2
+			},
+			{
+				"file" : 0,
+				"parent" : 3
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 159,
+				"parent" : 4
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 202,
+				"parent" : 4
+			},
+			{
+				"command" : 3,
+				"file" : 4,
+				"line" : 125,
+				"parent" : 6
+			},
+			{
+				"command" : 1,
+				"file" : 4,
+				"line" : 93,
+				"parent" : 7
+			},
+			{
+				"file" : 3,
+				"parent" : 8
+			},
+			{
+				"command" : 2,
+				"file" : 3,
+				"line" : 143,
+				"parent" : 9
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 11
+	},
+	"id" : "ignition-sensors6::requested::@6890427a1f51a3e7e1df",
+	"imported" : true,
+	"interfaceCompileDependencies" : 
+	[
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-air_pressure::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-altimeter::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-imu::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-force_torque::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-logical_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-magnetometer::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-navsat::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-rendering::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-lidar::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-gpu_lidar::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-boundingbox_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-segmentation_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-depth_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-rgbd_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-thermal_camera::@6890427a1f51a3e7e1df"
+		}
+	],
+	"interfaceLinkLibraries" : 
+	[
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-air_pressure::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-altimeter::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-imu::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-force_torque::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-logical_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-magnetometer::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-navsat::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-rendering::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-lidar::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-gpu_lidar::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-boundingbox_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-segmentation_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-depth_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-rgbd_camera::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 10,
+			"id" : "ignition-sensors6::ignition-sensors6-thermal_camera::@6890427a1f51a3e7e1df"
+		}
+	],
+	"local" : true,
+	"name" : "ignition-sensors6::requested",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sources" : [],
+	"type" : "INTERFACE_LIBRARY"
+}

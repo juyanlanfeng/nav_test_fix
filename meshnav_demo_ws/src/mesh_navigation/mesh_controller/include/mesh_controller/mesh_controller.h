@@ -41,6 +41,9 @@
 #include <mesh_map/mesh_map.h>
 #include <visualization_msgs/msg/marker_array.hpp>
 
+#include <string>
+#include <vector>
+
 namespace mesh_controller
 {
 class MeshController : public mbf_mesh_core::MeshController
@@ -188,6 +191,71 @@ private:
 
   // handle of callback for changing parameters dynamically
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr reconfiguration_callback_handle_;
+
+  // ---- RMUC ramp corridor constraint (phase 2) ----
+
+  // Geometry and behaviour of one traversable ramp corridor.
+  struct RampCorridor
+  {
+    std::string name;
+    std::string frame_id;
+    // 3-D polyline of the corridor centre line in `frame_id`; at least two points.
+    std::vector<mesh_map::Vector> centerline;
+    // Cumulative arc length (XY) at every centre-line vertex; size == centerline.size().
+    std::vector<double> seg_len;
+    double total_len = 0.0;
+
+    double half_width = 0.275;       // half of the keep-in corridor width [m]
+    double min_height = -0.05;       // engage only within this height band [m]
+    double max_height = 0.30;
+    double max_speed = 0.10;         // forward speed while traversing [m/s]
+    double approach_speed = 0.10;    // forward speed while approaching the entry
+    double align_dist = 0.5;         // longitudinal distance before the entry where alignment starts
+    double align_lat_tol = 0.02;     // lateral alignment tolerance [m]
+    double align_yaw_tol = 0.087266; // heading alignment tolerance [rad] (5 deg)
+    double align_hold_s = 0.3;       // how long alignment must persist before entering [s]
+    double exit_dist = 0.3;          // distance past the exit before normal control resumes [m]
+    double k_lat = 1.5;              // lateral error -> lateral speed gain [1/s]
+    double k_yaw = 1.5;              // heading error -> yaw rate gain [1/s]
+
+    // Projects `p` (XY) onto the centre line and reports progress `s`, the closest
+    // point, signed lateral offset (positive left of travel), the tangent unit vector
+    // and its yaw.
+    void project(const mesh_map::Vector& p, double& s, mesh_map::Vector& closest,
+                 double& lateral, mesh_map::Vector& tangent, double& tangent_yaw) const;
+  };
+
+  enum class CorridorPhase { NONE, APPROACH, ALIGN, TRAVERSE, EXIT };
+
+  void loadCorridors();
+  void resetCorridor();
+  int findActiveCorridor(const mesh_map::Vector& raw_pos,
+                         double& s, double& lateral,
+                         mesh_map::Vector& tangent, double& tangent_yaw);
+  // Returns +1 if the ordered plan genuinely crosses the corridor entry->exit,
+  // -1 for exit->entry, or 0 if the plan does not cross the corridor on the
+  // correct terrain layer (no engagement; never default to a direction).
+  int planCrossingDirection(const RampCorridor& corridor) const;
+  void applyCorridorConstraint(const mesh_map::Vector& raw_pos,
+                               double& linear_x, double& linear_y, double& angular_z,
+                               std::string& message);
+  void publishCorridorMarkers(const RampCorridor& corridor);
+
+  bool corridors_enabled_ = false;
+  std::vector<RampCorridor> corridors_;
+  int active_corridor_ = -1;
+  CorridorPhase corridor_phase_ = CorridorPhase::NONE;
+  // Planned traversal direction along the active corridor: +1 for entry->exit,
+  // -1 for exit->entry (downhill).
+  int corridor_direction_ = 1;
+  double corridor_s_ = 0.0;
+  double aligned_since_ = -1.0;
+  double stall_window_start_s_ = 0.0;
+  double stall_window_start_t_ = -1.0;
+  // Latched once a stall is detected; keeps the robot stopped and preserves the
+  // stall message until setPlan()/cancel() resets the corridor.
+  bool corridor_stalled_ = false;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr corridor_marker_pub_;
 
   struct {
     double max_lin_velocity = 1.0;

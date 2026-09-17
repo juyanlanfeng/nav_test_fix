@@ -1,0 +1,1 @@
+/home/rainple/nav_test/third_party/pb2025_build/rmoss_gz_plugins/ament_cmake_core/rmoss_gz_pluginsConfig-version.cmake

@@ -1,0 +1,185 @@
+{
+	"abstract" : true,
+	"backtrace" : 5,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"find_package",
+			"set_target_properties",
+			"__find_dependency_common",
+			"find_dependency"
+		],
+		"files" : 
+		[
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-common4/ignition-common4-config.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-gazebo6/ignition-gazebo6-config.cmake",
+			"CMakeLists.txt",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-common4-graphics/ignition-common4-graphics-config.cmake",
+			"/usr/local/share/cmake-4.4/Modules/CMakeFindDependencyMacro.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-rendering6/ignition-rendering6-config.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-gui6/ignition-gui6-config.cmake"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 2
+			},
+			{
+				"command" : 1,
+				"file" : 2,
+				"line" : 17,
+				"parent" : 0
+			},
+			{
+				"file" : 1,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 96,
+				"parent" : 2
+			},
+			{
+				"file" : 0,
+				"parent" : 3
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 154,
+				"parent" : 4
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 98,
+				"parent" : 2
+			},
+			{
+				"file" : 6,
+				"parent" : 6
+			},
+			{
+				"command" : 1,
+				"file" : 6,
+				"line" : 98,
+				"parent" : 7
+			},
+			{
+				"file" : 5,
+				"parent" : 8
+			},
+			{
+				"command" : 1,
+				"file" : 5,
+				"line" : 93,
+				"parent" : 9
+			},
+			{
+				"file" : 0,
+				"parent" : 10
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 197,
+				"parent" : 11
+			},
+			{
+				"command" : 3,
+				"file" : 4,
+				"line" : 125,
+				"parent" : 12
+			},
+			{
+				"command" : 1,
+				"file" : 4,
+				"line" : 93,
+				"parent" : 13
+			},
+			{
+				"file" : 3,
+				"parent" : 14
+			},
+			{
+				"command" : 2,
+				"file" : 3,
+				"line" : 144,
+				"parent" : 15
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 11
+	},
+	"id" : "ignition-common4::requested::@6890427a1f51a3e7e1df",
+	"imported" : true,
+	"interfaceCompileDependencies" : 
+	[
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-profiler::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-events::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-av::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-graphics::@6890427a1f51a3e7e1df"
+		}
+	],
+	"interfaceLinkLibraries" : 
+	[
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-profiler::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-events::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-av::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 16,
+			"id" : "ignition-common4::ignition-common4-graphics::@6890427a1f51a3e7e1df"
+		}
+	],
+	"local" : true,
+	"name" : "ignition-common4::requested",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sources" : [],
+	"type" : "INTERFACE_LIBRARY"
+}

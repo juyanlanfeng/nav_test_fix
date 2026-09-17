@@ -88,9 +88,25 @@ def generate_launch_description():
             default_value="0.4",
             description="Dynamic obstacle inscribed radius in metres.",
         ),
+        DeclareLaunchArgument(
+            "ramp_corridors_enabled",
+            default_value="false",
+            choices=["true", "false"],
+            description="Enable the RMUC ramp corridor constraint in MeshController.",
+        ),
+        DeclareLaunchArgument(
+            "ramp_corridors_config",
+            default_value=os.path.join(
+                get_package_share_directory("mesh_navigation_tutorials"),
+                "config",
+                "rmuc_ramp_corridors.yaml",
+            ),
+            description="Path to the ramp corridor configuration file.",
+        ),
     ]
     mesh_map_path = LaunchConfiguration("mesh_map_path")
     mesh_map_working_path = LaunchConfiguration("mesh_map_working_path")
+    ramp_corridors_config = LaunchConfiguration("ramp_corridors_config")
 
     mbf_mesh_nav_config = os.path.join(
         get_package_share_directory("mesh_navigation_tutorials"), "config", "mbf_mesh_nav.yaml"
@@ -105,11 +121,16 @@ def generate_launch_description():
         ],
         parameters=[
             mbf_mesh_nav_config,
+            ramp_corridors_config,
             {
                 "mesh_map.mesh_file": mesh_map_path,
                 "mesh_map.mesh_working_file": mesh_map_working_path,
                 "mesh_controller.holonomic": ParameterValue(
                     LaunchConfiguration("mesh_controller_holonomic"),
+                    value_type=bool,
+                ),
+                "mesh_controller.ramp_corridors_enabled": ParameterValue(
+                    LaunchConfiguration("ramp_corridors_enabled"),
                     value_type=bool,
                 ),
                 "mesh_map.height_diff.threshold": ParameterValue(

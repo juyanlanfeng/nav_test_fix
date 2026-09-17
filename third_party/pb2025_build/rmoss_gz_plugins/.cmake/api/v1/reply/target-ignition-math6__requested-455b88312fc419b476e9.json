@@ -1,0 +1,172 @@
+{
+	"abstract" : true,
+	"backtrace" : 5,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"find_package",
+			"set_target_properties",
+			"__find_dependency_common",
+			"find_dependency"
+		],
+		"files" : 
+		[
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-math6/ignition-math6-config.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-msgs8/ignition-msgs8-config.cmake",
+			"CMakeLists.txt",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-math6-eigen3/ignition-math6-eigen3-config.cmake",
+			"/usr/local/share/cmake-4.4/Modules/CMakeFindDependencyMacro.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-rendering6/ignition-rendering6-config.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-gui6/ignition-gui6-config.cmake",
+			"/usr/lib/x86_64-linux-gnu/cmake/ignition-gazebo6/ignition-gazebo6-config.cmake"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 2
+			},
+			{
+				"command" : 1,
+				"file" : 2,
+				"line" : 13,
+				"parent" : 0
+			},
+			{
+				"file" : 1,
+				"parent" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 93,
+				"parent" : 2
+			},
+			{
+				"file" : 0,
+				"parent" : 3
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 153,
+				"parent" : 4
+			},
+			{
+				"command" : 1,
+				"file" : 2,
+				"line" : 17,
+				"parent" : 0
+			},
+			{
+				"file" : 7,
+				"parent" : 6
+			},
+			{
+				"command" : 1,
+				"file" : 7,
+				"line" : 98,
+				"parent" : 7
+			},
+			{
+				"file" : 6,
+				"parent" : 8
+			},
+			{
+				"command" : 1,
+				"file" : 6,
+				"line" : 98,
+				"parent" : 9
+			},
+			{
+				"file" : 5,
+				"parent" : 10
+			},
+			{
+				"command" : 1,
+				"file" : 5,
+				"line" : 92,
+				"parent" : 11
+			},
+			{
+				"file" : 0,
+				"parent" : 12
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 196,
+				"parent" : 13
+			},
+			{
+				"command" : 3,
+				"file" : 4,
+				"line" : 125,
+				"parent" : 14
+			},
+			{
+				"command" : 1,
+				"file" : 4,
+				"line" : 93,
+				"parent" : 15
+			},
+			{
+				"file" : 3,
+				"parent" : 16
+			},
+			{
+				"command" : 2,
+				"file" : 3,
+				"line" : 143,
+				"parent" : 17
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 11
+	},
+	"id" : "ignition-math6::requested::@6890427a1f51a3e7e1df",
+	"imported" : true,
+	"interfaceCompileDependencies" : 
+	[
+		{
+			"backtrace" : 18,
+			"id" : "ignition-math6::ignition-math6::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 18,
+			"id" : "ignition-math6::ignition-math6::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 18,
+			"id" : "ignition-math6::ignition-math6-eigen3::@6890427a1f51a3e7e1df"
+		}
+	],
+	"interfaceLinkLibraries" : 
+	[
+		{
+			"backtrace" : 18,
+			"id" : "ignition-math6::ignition-math6::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 18,
+			"id" : "ignition-math6::ignition-math6::@6890427a1f51a3e7e1df"
+		},
+		{
+			"backtrace" : 18,
+			"id" : "ignition-math6::ignition-math6-eigen3::@6890427a1f51a3e7e1df"
+		}
+	],
+	"local" : true,
+	"name" : "ignition-math6::requested",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sources" : [],
+	"type" : "INTERFACE_LIBRARY"
+}
