@@ -350,12 +350,24 @@ walls and tunnel roofs live in two other places:
   with `ros-humble-octomap-rviz-plugins`, which is *not* installed here:
   `sudo apt install ros-humble-octomap-rviz-plugins`, then Add -> By topic ->
   `/octomap`.
-- **`/cloud_pcd`** (the same PCD as a latched `PointCloud2`, ~631564 points,
-  frame `map`), published by `pb_jie.launch.py` (`publish_map_cloud:=True`, node
-  `pb_map_cloud`, `pcd_to_pointcloud` from `pcl_ros`) and displayed by
-  `pb_jie.rviz` as "MapCloud", coloured by z so floor, walls and roofs are
-  distinguishable. `period:=0.0` publishes once and latches, so the RViz display
-  must use `Durability Policy: Transient Local` (the shipped config does).
+- **`/cloud_pcd`** (the same PCD as a `PointCloud2`, ~631564 points, frame
+  `map`), published by `pb_jie.launch.py` (`publish_map_cloud:=True`, node
+  `pb_map_cloud`) and displayed by `pb_jie.rviz` as "MapCloud (static PCD)".
+
+  **QoS matters here.** RViz's PointCloud2 display subscribes with
+  `Durability: Transient Local`, so the publisher has to offer transient local.
+  `pcl_ros/pcd_to_pointcloud` does **not** (`ros2 topic info --verbose` reports
+  `Durability: VOLATILE`), and the mismatch is fatal: RViz logs
+
+  ```text
+  [pb_map_cloud]: ... incompatible QoS ... Last incompatible policy: DURABILITY_QOS_POLICY
+  ```
+
+  and shows nothing, whether the cloud is sent once or repeatedly. The
+  replacement is `pb_vehicle_adapter/pcd_publisher.py` (entry point
+  `pb_pcd_publisher`, used by the launch file): it reads the PCD once, publishes
+  with `TRANSIENT_LOCAL + RELIABLE + KEEP_LAST(1)` and stays alive, so an RViz
+  started later still receives the cloud.
 
 Because only ~22 % of that cloud is floor, there is also a **ground-only layer**:
 `field/build_jie_floor_pcd.py` keeps the lowest surface of every 4 cm (x, y) cell
@@ -417,19 +429,44 @@ Alternatives to clicking: `pb_nav_goal` does plan + start in one command, e.g.
 ros2 run pb_vehicle_adapter pb_nav_goal --framework jie --x -0.60 --y 6.00 --z 0.06 --yaw 0
 ```
 
-To get the clouds into a running session without restarting the launch:
+To get the clouds into a running session without restarting the launch, use the
+latched publisher (the RViz displays expect `Transient Local`):
 
 ```bash
-ros2 run pcl_ros pcd_to_pointcloud --ros-args \
-  -p file_name:=/home/rainple/nav_test/field/converted_rmuc2026/jie_nav/rmuc2026_field.pcd \
-  -p period:=0.0 -p tf_frame:=map
+ros2 run pb_vehicle_adapter pb_pcd_publisher --ros-args \
+  -r __node:=floor_display_debug \
+  -p file_name:=/home/rainple/nav_test/field/converted_rmuc2026/jie_nav/rmuc2026_field_floor.pcd \
+  -p topic:=/cloud_pcd_floor -p frame_id:=map -p period:=0.0
 ```
 
-Two details that cost time here: the frame parameter of `pcd_to_pointcloud` is
-`tf_frame` (not `frame_id`, which is silently ignored and leaves the cloud on
-`base_link`, i.e. glued to the robot), and the node keeps `use_sim_time: False`
-because with `period:=0.0` the publish happens from a timer that never fires
-while `/clock` is frozen or absent.
+Verify the durability contract on a live system - a transient-local subscriber
+started *after* the publisher is exactly what RViz does:
+
+```bash
+ros2 topic info /cloud_pcd_floor --verbose            # expect Durability: TRANSIENT_LOCAL
+python3 - <<'PROBE'
+import rclpy, time
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
+from sensor_msgs.msg import PointCloud2
+rclpy.init(); node = rclpy.create_node("probe")
+qos = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
+                 reliability=ReliabilityPolicy.RELIABLE,
+                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
+got = {}
+node.create_subscription(PointCloud2, "/cloud_pcd_floor",
+                         lambda m: got.update(width=m.width, frame=m.header.frame_id), qos)
+deadline = time.time() + 10
+while time.time() < deadline and not got:
+    rclpy.spin_once(node, timeout_sec=0.2)
+print(got or "not received")
+PROBE
+# -> {'width': 307206, 'frame': 'map'}
+```
+
+If you prefer to keep `pcd_to_pointcloud`: set the RViz displays'
+`Durability Policy` to `Volatile` and run it with `period:=1.0` so it keeps
+re-sending. That works, but it streams 631k points (~7.6 MB/s) forever, which is
+why the latched publisher is the default.
 
 For MeshNav the equivalent ground is `/move_base_flex/mesh` (the `Mesh Map`
 display) plus `/move_base_flex/vertex_costs` for the cost colouring.

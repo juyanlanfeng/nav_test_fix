@@ -108,22 +108,23 @@ def generate_launch_description():
         package="jie_octomap", executable="pcd_to_octomap_node", name="pcd_to_octomap", output="screen",
         parameters=[{"use_sim_time": True, "pcd_file": LaunchConfiguration("pcd_file"), "resolution": 0.04, "voxel_downsample_m": 0.0, "min_points_per_voxel": 1, "min_cluster_voxels": 1, "frame_id": "map", "octomap_topic": "/octomap"}],
     )
-    # period 0.0 = publish once and latch, so a later RViz still receives the map.
+    # pb_pcd_publisher, not pcl_ros/pcd_to_pointcloud: the latter publishes with
+    # `Durability: VOLATILE` (verified with `ros2 topic info --verbose`), which is
+    # incompatible with RViz's PointCloud2 display subscribing as
+    # `TRANSIENT_LOCAL` - RViz then logs "incompatible QoS ... DURABILITY_QOS_POLICY"
+    # and shows nothing, whether the cloud is sent once or repeatedly.  Our node
+    # publishes once with TRANSIENT_LOCAL and stays alive, so a later RViz still
+    # gets the map without streaming it again.
     map_cloud = Node(
-        package="pcl_ros", executable="pcd_to_pointcloud", name="pb_map_cloud", output="log",
-        # use_sim_time stays False on purpose: with period 0.0 the publish happens
-        # from a timer, and a ROS timer never fires while /clock is absent or
-        # frozen, which would leave the map invisible.
-        parameters=[{"use_sim_time": False, "file_name": LaunchConfiguration("pcd_file"),
-                     "period": 0.0, "tf_frame": "map"}],
-        remappings=[("cloud_pcd", "/cloud_pcd")],
+        package="pb_vehicle_adapter", executable="pb_pcd_publisher", name="pb_map_cloud", output="log",
+        parameters=[{"file_name": LaunchConfiguration("pcd_file"), "topic": "/cloud_pcd",
+                     "frame_id": "map", "period": 0.0}],
         condition=IfCondition(LaunchConfiguration("publish_map_cloud")),
     )
     floor_cloud = Node(
-        package="pcl_ros", executable="pcd_to_pointcloud", name="pb_floor_cloud", output="log",
-        parameters=[{"use_sim_time": False, "file_name": LaunchConfiguration("floor_pcd_file"),
-                     "period": 0.0, "tf_frame": "map"}],
-        remappings=[("cloud_pcd", "/cloud_pcd_floor")],
+        package="pb_vehicle_adapter", executable="pb_pcd_publisher", name="pb_floor_cloud", output="log",
+        parameters=[{"file_name": LaunchConfiguration("floor_pcd_file"),
+                     "topic": "/cloud_pcd_floor", "frame_id": "map", "period": 0.0}],
         condition=IfCondition(LaunchConfiguration("publish_floor_cloud")),
     )
     planner = Node(

@@ -67,6 +67,12 @@ def _setup(context):
         "grid_map.cloud_is_world": cloud_is_world,
         "grid_map.need_extrinsic": need_extrinsic,
     }
+
+# add_executable(scan_planner_node
+#   src/scan_planner_node.cpp
+#   src/scan_replan_fsm.cpp
+#   src/planner_manager.cpp)
+# 一共有三个cpp被编译到scan_planner_node
     actions = [
         Node(
             package="scan_planner",
@@ -82,7 +88,7 @@ def _setup(context):
                 ("move_base_simple/goal", "/move_base_simple/goal"),
                 ("initial_path", "/initial_path"),
             ],
-        )
+        ) # 规划器本体
     ]
     actions.append(
         Node(
@@ -99,7 +105,7 @@ def _setup(context):
                     )
                 },
             ],
-        )
+        ) # ROS 2 官方包，不是本仓库代码，仅用于仿真
     )
 
     if controller_mode == "open_loop":
@@ -114,7 +120,7 @@ def _setup(context):
                     ("planning/bspline", "/planning/bspline"),
                     ("body_pose", body_pose),
                 ],
-            )
+            ) # 开环控制器，直接用B样条计算并发布body_pose，主要用于纯算法验证
         )
     else:
         actions.append(
@@ -128,7 +134,7 @@ def _setup(context):
                     ("body_pose", body_pose),
                     ("cmd_vel", "/cmd_vel" if is_real else "/quad_0/cmd_vel"),
                 ],
-            )
+            ) # 闭环控制器
         )
         if not is_real:
             actions.append(
@@ -151,7 +157,7 @@ def _setup(context):
                         ("body_pose", "/quad_0/body_pose"),
                         ("cmd_vel", "/quad_0/cmd_vel"),
                     ],
-                )
+                ) # 还是用于仿真，只在仿真+闭环时启动
             )
 
     if not is_real:
@@ -185,7 +191,7 @@ def _setup(context):
                     }.items(),
                 ),
             ]
-        )
+        ) # 这个启动的是simulator.launch.py，仅用于仿真demo，正常情况下一个都用不到
     return actions
 
 

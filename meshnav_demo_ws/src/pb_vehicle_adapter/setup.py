@@ -38,6 +38,7 @@ setup(
             "pb_preflight = pb_vehicle_adapter.pb_preflight:main",
             "pb_dddmr_map_publisher = pb_vehicle_adapter.dddmr_map_publisher:main",
             "pb_nav_goal = pb_vehicle_adapter.pb_nav_goal:main",
+            "pb_pcd_publisher = pb_vehicle_adapter.pcd_publisher:main",
         ],
     },
 )

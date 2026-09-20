@@ -1,3 +1,4 @@
+// 规划算法后端
 // #include <fstream>
 #include <plan_manage/planner_manager.h>
 #include <chrono>
@@ -258,6 +259,11 @@ namespace scan_planner
 
     t_init = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
 
+    // 下面两行只发布 RViz 标记，不参与任何规划决策（返回 void、按值传参，改不到上面的数据）。
+    // 但它们是无条件调用的：visualization_ 为空会直接段错误 —— initPlanModules() 的 vis
+    // 参数有 nullptr 默认值，所以省掉第二个参数就会在这里崩。
+    // 另外注意它们夹在 t_init 计时结束之后、下一次 t_start 之前，而最后打印的是
+    // t_init + t_opt + t_refine，因此日志里的 total time 不包含这两行的开销。
     static int vis_id = 0;
     visualization_->displayInitPathList(point_set, 0.2, 0);
     visualization_->displayAStarList(a_star_paths, vis_id);
