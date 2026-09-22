@@ -44,3 +44,24 @@ def reduced_model_xml(path):
         raise ValueError("expected %s, removed %s"
                          % (sorted(RENDERING_SENSORS), sorted(removed)))
     return ET.tostring(root, encoding="unicode")
+
+
+def simulation_model_xml(path, rendering=False, diagnostics=False, drive="legacy"):
+    """Select optional simulation plugins without changing physical geometry."""
+    root = ET.parse(path).getroot()
+    if not rendering:
+        strip_rendering_sensors(root)
+    model = root.find("model")
+    if drive == "pi":
+        original = model.find("plugin[@filename='MecanumDrive2']")
+        if original is None:
+            raise ValueError("expected exactly one upstream MecanumDrive2")
+        model.remove(original)
+        ET.SubElement(model, "plugin", filename="pb_velocity_drive_system",
+                      name="pb_gazebo_sim_support::VelocityDrive")
+    elif drive != "legacy":
+        raise ValueError("unknown drive model: " + drive)
+    plugin = model.find("plugin[@name='pb_gazebo_sim_support::ContactDiagnostics']")
+    if plugin is not None:
+        plugin.find("enable").text = "true" if diagnostics else "false"
+    return ET.tostring(root, encoding="unicode")

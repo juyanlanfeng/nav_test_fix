@@ -32,7 +32,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
@@ -89,50 +89,45 @@ def generate_launch_description():
             description="Dynamic obstacle inscribed radius in metres.",
         ),
         DeclareLaunchArgument(
-            "ramp_corridors_enabled",
-            default_value="false",
-            choices=["true", "false"],
-            description="Enable the RMUC ramp corridor constraint in MeshController.",
+            "extra_params_file", default_value="",
+            description="Optional extra parameter file loaded after the base MeshNav "
+                        "config (used by an entry to supply its own plugin parameters "
+                        "without putting them in the shared config).",
         ),
         DeclareLaunchArgument(
-            "ramp_corridors_config",
-            default_value=os.path.join(
-                get_package_share_directory("mesh_navigation_tutorials"),
-                "config",
-                "rmuc_ramp_corridors.yaml",
-            ),
-            description="Path to the ramp corridor configuration file.",
+            "controller_plugin",
+            default_value="mesh_controller",
+            choices=["mesh_controller", "pb_terminal_controller"],
+            description="Which declared controller plugin is active. Selects the "
+                        "entry in the controllers list; both types are declared in "
+                        "mbf_mesh_nav.yaml so no shared controller logic changes.",
         ),
     ]
     mesh_map_path = LaunchConfiguration("mesh_map_path")
     mesh_map_working_path = LaunchConfiguration("mesh_map_working_path")
-    ramp_corridors_config = LaunchConfiguration("ramp_corridors_config")
 
     mbf_mesh_nav_config = os.path.join(
         get_package_share_directory("mesh_navigation_tutorials"), "config", "mbf_mesh_nav.yaml"
     )
 
-    mesh_nav_server = Node(
-        name="move_base_flex",
-        package="mbf_mesh_nav",
-        executable="mbf_mesh_nav",
-        remappings=[
-            ("/move_base_flex/cmd_vel", "/cmd_vel"),
-        ],
-        parameters=[
-            mbf_mesh_nav_config,
-            ramp_corridors_config,
+    def _server_node(context):
+        # `controllers` is a string array; launch cannot build one from a list of
+        # substitutions, so it is resolved here to a plain list.
+        controller_plugin = LaunchConfiguration("controller_plugin").perform(context)
+        extra_params_file = LaunchConfiguration("extra_params_file").perform(context)
+        parameters = [mbf_mesh_nav_config]
+        if extra_params_file:
+            # Loaded after the shared config so an entry can override it, and before
+            # the inline overrides below so those still win.
+            parameters.append(extra_params_file)
+        parameters.append(
             {
+                # A list of substitutions is evaluated element-wise for a string
+                # array parameter; ParameterValue(..., value_type=list) is rejected
+                # by launch ("Unrecognized data type: list").
+                "controllers": [controller_plugin],
                 "mesh_map.mesh_file": mesh_map_path,
                 "mesh_map.mesh_working_file": mesh_map_working_path,
-                "mesh_controller.holonomic": ParameterValue(
-                    LaunchConfiguration("mesh_controller_holonomic"),
-                    value_type=bool,
-                ),
-                "mesh_controller.ramp_corridors_enabled": ParameterValue(
-                    LaunchConfiguration("ramp_corridors_enabled"),
-                    value_type=bool,
-                ),
                 "mesh_map.height_diff.threshold": ParameterValue(
                     LaunchConfiguration("height_diff_threshold"), value_type=float
                 ),
@@ -152,12 +147,18 @@ def generate_launch_description():
                     LaunchConfiguration("obstacle_inscribed_radius"), value_type=float
                 ),
             }
-        ],
-    )
+        )
+        return [Node(
+            name="move_base_flex",
+            package="mbf_mesh_nav",
+            executable="mbf_mesh_nav",
+            remappings=[
+                ("/move_base_flex/cmd_vel", "/cmd_vel"),
+            ],
+            parameters=parameters,
+        )]
 
     return LaunchDescription(
         launch_args
-        + [
-            mesh_nav_server,
-        ]
+        + [OpaqueFunction(function=_server_node)],
     )

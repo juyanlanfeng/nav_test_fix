@@ -9,16 +9,21 @@ pb_vehicle_adapter/robot_model.py for why the sensors are removed.
 """
 
 import sys
+import argparse
 
-from pb_vehicle_adapter.robot_model import reduced_model_xml
+from pb_vehicle_adapter.robot_model import simulation_model_xml
 
 
 def main(argv):
-    if len(argv) != 2:
-        print("usage: reduced_robot_model.py <robot.sdf>", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser()
+    parser.add_argument("model")
+    parser.add_argument("--rendering", choices=["True", "False"], default="False")
+    parser.add_argument("--diagnostics", choices=["True", "False"], default="False")
+    parser.add_argument("--drive", choices=["legacy", "pi"], default="legacy")
+    args = parser.parse_args(argv[1:])
     try:
-        sys.stdout.write(reduced_model_xml(argv[1]))
+        sys.stdout.write(simulation_model_xml(
+            args.model, args.rendering == "True", args.diagnostics == "True", args.drive))
     except (OSError, ValueError) as exc:
         print("reduced_robot_model.py: %s" % exc, file=sys.stderr)
         return 1

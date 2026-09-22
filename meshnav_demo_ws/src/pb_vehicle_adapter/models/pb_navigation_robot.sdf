@@ -497,5 +497,23 @@
 			<rear_right_joint>rear_right_wheel_joint</rear_right_joint>
 		</plugin>
 		
+		<plugin filename="pb_chassis_truth_system" name="pb_gazebo_sim_support::ChassisTruth">
+			<link_name>chassis</link_name>
+			<topic>/pb_sim/chassis_truth</topic>
+			<world_frame>rmuc2026_field</world_frame>
+			<child_frame>chassis</child_frame>
+			<publish_period_s>0.01</publish_period_s>
+		</plugin>
+		
+		<plugin filename="pb_contact_diagnostics_system" name="pb_gazebo_sim_support::ContactDiagnostics">
+			<enable>false</enable>
+			<enable_actuator>true</enable_actuator>
+			<enable_contact>true</enable_contact>
+			<link_name>chassis</link_name>
+			<joints>front_left_wheel_joint front_right_wheel_joint rear_left_wheel_joint rear_right_wheel_joint</joints>
+			<topic_prefix>/pb_sim/diagnostics</topic_prefix>
+			<publish_period_s>0.05</publish_period_s>
+		</plugin>
+		
 	</model>
 </sdf>

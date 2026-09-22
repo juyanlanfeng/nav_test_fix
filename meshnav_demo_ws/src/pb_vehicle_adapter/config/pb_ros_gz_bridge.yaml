@@ -10,6 +10,17 @@
   gz_type_name: ignition.msgs.Odometry
   direction: GZ_TO_ROS
 
+# Single same-step source of navigation truth (pb_gazebo_sim_support /
+# ChassisTruth): 6-DOF chassis pose in the world frame and twist in the chassis
+# frame, stamped with the simulation time of the step that produced them.  This
+# is the only odometry the ground-truth adapter consumes; /pb/odom_raw and the two
+# pose streams stay recorded for comparison only.
+- ros_topic_name: /pb_sim/chassis_truth
+  gz_topic_name: /pb_sim/chassis_truth
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: ignition.msgs.Odometry
+  direction: GZ_TO_ROS
+
 - ros_topic_name: /imu/data
   gz_topic_name: /robot/imu
   ros_type_name: sensor_msgs/msg/Imu

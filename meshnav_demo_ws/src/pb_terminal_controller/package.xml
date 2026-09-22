@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pb_terminal_controller</name>
+  <version>0.1.0</version>
+  <description>
+    Independent MeshNav controller plugin that adds a generic terminal state machine
+    (position settle, in-place goal alignment, dwell, health gating, level-aware goal
+    handling) on top of the stock tracking controller.  Scene-independent: it knows
+    nothing about ramps or tunnels, and it is selected by the PB entry instead of
+    being patched into the shared MeshController.
+  </description>
+  <maintainer email="rainple@example.com">rainple</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>lvr2</depend>
+  <depend>mbf_mesh_core</depend>
+  <depend>mbf_msgs</depend>
+  <depend>mesh_controller</depend>
+  <depend>mesh_map</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

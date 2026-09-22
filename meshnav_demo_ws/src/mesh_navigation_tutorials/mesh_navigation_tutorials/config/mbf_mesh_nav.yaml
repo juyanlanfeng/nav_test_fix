@@ -30,6 +30,7 @@ move_base_flex:
       ang_vel_factor: 7.0
       lin_vel_factor: 1.0
 
+
     controller_patience: 2.0
     controller_max_retries: 4
     dist_tolerance: 0.2

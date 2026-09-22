@@ -41,6 +41,8 @@ def generate_launch_description():
 
     declared_arguments = [
         DeclareLaunchArgument("world_name", default_value="rmuc2026_field"),
+        DeclareLaunchArgument("contact_diagnostics", default_value="False", choices=["True", "False"]),
+        DeclareLaunchArgument("drive_model", default_value="legacy", choices=["legacy", "pi"]),
         DeclareLaunchArgument("start_gazebo_gui", default_value="True", choices=["True", "False"]),
         DeclareLaunchArgument("start_rviz", default_value="True", choices=["True", "False"]),
         DeclareLaunchArgument(
@@ -118,14 +120,21 @@ def generate_launch_description():
     reduced_model = Command(
         [FindExecutable(name="python3"), " ",
          PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "tools", "reduced_robot_model.py"]),
-         " ", robot_model]
+         " ", robot_model, " --diagnostics ", LaunchConfiguration("contact_diagnostics"),
+         " --drive ", LaunchConfiguration("drive_model")]
+    )
+    full_model = Command(
+        [FindExecutable(name="python3"), " ",
+         PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "tools", "reduced_robot_model.py"]),
+         " ", robot_model, " --rendering True --diagnostics ", LaunchConfiguration("contact_diagnostics"),
+         " --drive ", LaunchConfiguration("drive_model")]
     )
     spawn = Node(
         package="ros_gz_sim",
         executable="create",
         name="spawn_pb_navigation_robot",
         output="screen",
-        arguments=["-file", robot_model] + spawn_arguments,
+        arguments=["-string", full_model] + spawn_arguments,
         parameters=[{"use_sim_time": True}],
         condition=IfCondition(LaunchConfiguration("spawn_rendering_sensors")),
     )
@@ -164,20 +173,40 @@ def generate_launch_description():
         parameters=[
             {
                 "use_sim_time": True,
-                "world_frame": world_name,
-                "chassis_frame": "robot/chassis",
-                "raw_pose_topic": "/pb/poses_raw",
+                # Single same-step source (pb_gazebo_sim_support / ChassisTruth).
+                # The old two-stream composition and its raw_pose/world_pose
+                # parameters are gone; those topics are still recorded for
+                # comparison but no longer drive /odom or the TF tree.
+                "truth_topic": "/pb_sim/chassis_truth",
+                "health_topic": "/pb/truth_health",
                 "base_to_chassis_xyz": [float(v) for v in profile["base_to_chassis_xyz"]],
                 "base_to_chassis_xyzw": [float(v) for v in profile["base_to_chassis_xyzw"]],
             },
         ],
     )
+    # Post-action station keeping (P3).  When the navigation command stops -- the
+    # ExePath action has ended and force_stop_at_goal publishes zero -- this vehicle
+    # keeps sliding, because zero command is not a brake on a force-based drive
+    # (measured: 1.7698 m over 95 s, and still 0.2649 m over 103 s after the terminal
+    # controller's own hold was added, since a controller plugin gets no execution
+    # opportunity once its action ends).  The adapter owns the output topic and the
+    # watchdog, so the hold belongs here.  It is enabled explicitly for the simulation;
+    # the code default stays off so the real-robot chain is unchanged unless set.
     velocity = Node(
         package="pb_vehicle_adapter",
         executable="pb_cmd_vel_adapter",
         name="pb_cmd_vel_adapter",
         output="screen",
-        parameters=[{"use_sim_time": True, "control_source": LaunchConfiguration("control_source")}],
+        parameters=[{
+            "use_sim_time": True,
+            "control_source": LaunchConfiguration("control_source"),
+            "hold_enabled": True,
+            "hold_pose_topic": "/odom",
+            "hold_gain": 1.0,
+            "hold_max_linear_velocity": 0.1,
+            "hold_max_angular_velocity": 0.2,
+            "hold_angular_deadband": 0.02,
+        }],
     )
     rviz = Node(
         package="rviz2",

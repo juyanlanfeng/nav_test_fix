@@ -45,6 +45,8 @@ def generate_launch_description():
         DeclareLaunchArgument("spawn_x", default_value="-11.9"),
         DeclareLaunchArgument("spawn_y", default_value="-4.4"),
         DeclareLaunchArgument("spawn_z", default_value="0.25"),
+        DeclareLaunchArgument("spawn_yaw_deg", default_value="0"),
+        DeclareLaunchArgument("drive_model", default_value="legacy", choices=["legacy", "pi"]),
         DeclareLaunchArgument(
             "mesh_map_working_path",
             default_value="/home/rainple/nav_test/meshnav_demo_ws/rmuc2026_pb_navigation.h5",
@@ -71,6 +73,14 @@ def generate_launch_description():
             "mesh_controller_holonomic", default_value="false", choices=["true", "false"],
             description="true lets the mecanum base translate sideways.",
         ),
+        DeclareLaunchArgument(
+            "controller_plugin", default_value="mesh_controller",
+            choices=["mesh_controller", "pb_terminal_controller"],
+            description="Terminal-control layer used by this PB entry. "
+                        "pb_terminal_controller is the self-developed state machine "
+                        "(doc/PB_SLOPE_REPAIR_AND_DEPLOYMENT_PLAN.md R3); "
+                        "mesh_controller stays the stock comparison path.",
+        ),
         DeclareLaunchArgument("static_inscribed_radius", default_value=str(profile["static_inscribed_radius"])),
         DeclareLaunchArgument("static_inflation_radius", default_value=str(profile["static_inflation_radius"])),
         DeclareLaunchArgument("height_diff_threshold", default_value="0.2"),
@@ -87,6 +97,8 @@ def generate_launch_description():
             "spawn_x": LaunchConfiguration("spawn_x"),
             "spawn_y": LaunchConfiguration("spawn_y"),
             "spawn_z": LaunchConfiguration("spawn_z"),
+            "spawn_yaw_deg": LaunchConfiguration("spawn_yaw_deg"),
+            "drive_model": LaunchConfiguration("drive_model"),
         }.items(),
         condition=IfCondition(LaunchConfiguration("start_sim")),
     )
@@ -109,7 +121,17 @@ def generate_launch_description():
             "obstacle_robot_height": str(profile["robot_height"]),
             "obstacle_inflation_radius": str(profile["obstacle_inflation_radius"]),
             "obstacle_inscribed_radius": str(profile["obstacle_inscribed_radius"]),
-            "ramp_corridors_enabled": str(profile["ramp_corridors_enabled"]).lower(),
+            "controller_plugin": LaunchConfiguration("controller_plugin"),
+            # PB-owned parameter file, loaded only when this entry selects the
+            # experimental terminal controller: the shared MeshNav config carries no
+            # PB simulation parameters or health topic.
+            "extra_params_file": PythonExpression([
+                "'", PathJoinSubstitution([
+                    FindPackageShare("pb_vehicle_adapter"), "config", "pb_terminal_controller.yaml"
+                ]),
+                "' if '", LaunchConfiguration("controller_plugin"),
+                "' == 'pb_terminal_controller' else ''",
+            ]),
         }.items(),
     )
     rviz = Node(

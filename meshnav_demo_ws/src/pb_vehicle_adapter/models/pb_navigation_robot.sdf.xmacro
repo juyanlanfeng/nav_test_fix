@@ -276,6 +276,52 @@
       <rear_right_joint>rear_right_wheel_joint</rear_right_joint>
     </plugin>
 
+    <!-- Single same-step source of navigation truth (see
+         doc/PB_SLOPE_REPAIR_AND_DEPLOYMENT_PLAN.md section 4).  The chassis pose
+         and the engine velocities are read in one simulation step and stamped
+         with that step's simulation time, so the navigation chain never has to
+         fuse two asynchronous streams.  Poses are world-frame, the twist is
+         expressed in the chassis frame per the odometry contract; the
+         MecanumDrive2 odometry stays available for comparison but is not used as
+         the production source because it publishes yaw-only orientation and no z.
+         The plugin library comes from pb_gazebo_sim_support, whose environment
+         hook puts it on the Gazebo system plugin path. -->
+    <plugin filename="pb_chassis_truth_system"
+            name="pb_gazebo_sim_support::ChassisTruth">
+      <link_name>chassis</link_name>
+      <topic>/pb_sim/chassis_truth</topic>
+      <world_frame>rmuc2026_field</world_frame>
+      <child_frame>chassis</child_frame>
+      <publish_period_s>0.01</publish_period_s>
+    </plugin>
+
+    <!-- Read-only contact/actuator diagnostics (see
+         doc/PB_SLOPE_NEXT_STEPS_20260921.md P1).  DEFAULT OFF: with <enable>false
+         the plugin logs one line and then never advertises a topic, never creates a
+         component and never publishes.  It only READS engine state — requested body
+         wrench, joint velocity/position/force and contact sensor data — and never
+         writes a component or touches mass, friction, collision geometry, gravity or
+         any controller parameter, so switching it on cannot change the outcome of
+         the run it is measuring.
+
+         Turning it on is a deliberate edit of this one element:
+           <enable>false</enable>  ->  <enable>true</enable>
+         Actuator diagnostics need no other prerequisite.  Contact diagnostics
+         additionally need a <sensor type="contact"> on the chassis and the world to
+         load ignition-gazebo-contact-system; without them the plugin says so rather
+         than publishing a silent empty stream, so set <enable_contact>false</enable_contact>
+         when only the actuator half is wanted. -->
+    <plugin filename="pb_contact_diagnostics_system"
+            name="pb_gazebo_sim_support::ContactDiagnostics">
+      <enable>false</enable>
+      <enable_actuator>true</enable_actuator>
+      <enable_contact>true</enable_contact>
+      <link_name>chassis</link_name>
+      <joints>front_left_wheel_joint front_right_wheel_joint rear_left_wheel_joint rear_right_wheel_joint</joints>
+      <topic_prefix>/pb_sim/diagnostics</topic_prefix>
+      <publish_period_s>0.05</publish_period_s>
+    </plugin>
+
     <!-- No gimbal JointController plugins: the gimbal joints do not exist. -->
   </model>
 </sdf>
