@@ -1,0 +1,28 @@
+{
+  "source_pcd": "/home/rainple/nav_test/field/pcd/map.pcd",
+  "source_sha256": "b2986794e0a468768279e591833ac97f201c61116be068b2e3b21b9d8d249f2d",
+  "encoding": "binary",
+  "fields": [
+    "x",
+    "y",
+    "z"
+  ],
+  "points_declared": 348622,
+  "header_bytes": 177,
+  "trailing_padding_bytes": 3919,
+  "finite_points": 348622,
+  "nonfinite_points_removed": 0,
+  "valid_supplied_normals": 0,
+  "bounds": {
+    "min": [
+      -13.255967140197754,
+      -11.157942771911621,
+      -1.5948742628097534
+    ],
+    "max": [
+      18.576553344726562,
+      9.981752395629883,
+      3.39215350151062
+    ]
+  }
+}

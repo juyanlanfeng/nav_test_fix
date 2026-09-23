@@ -53,6 +53,12 @@ def generate_launch_description():
             "to store costs during operation. Only HDF5 formats are permitted.",
         ),
         DeclareLaunchArgument(
+            "use_sim_time",
+            default_value="true",
+            choices=["true", "false"],
+            description="Use /clock. Set false for map-only planning without a simulator.",
+        ),
+        DeclareLaunchArgument(
             "mesh_controller_holonomic",
             default_value="false",
             choices=["true", "false"],
@@ -126,6 +132,9 @@ def generate_launch_description():
                 # array parameter; ParameterValue(..., value_type=list) is rejected
                 # by launch ("Unrecognized data type: list").
                 "controllers": [controller_plugin],
+                "use_sim_time": ParameterValue(
+                    LaunchConfiguration("use_sim_time"), value_type=bool
+                ),
                 "mesh_map.mesh_file": mesh_map_path,
                 "mesh_map.mesh_working_file": mesh_map_working_path,
                 "mesh_map.height_diff.threshold": ParameterValue(
