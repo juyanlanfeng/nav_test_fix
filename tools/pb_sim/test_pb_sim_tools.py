@@ -133,6 +133,7 @@ def test_isolation_result_is_json_serialisable():
 
 # ---------------------------------------------------------------- analyzer helpers
 from pb_sim import analyze_report as analyzer
+from pb_sim import session
 from pb_sim import compare_plugin_runs as comparison
 
 
@@ -605,3 +606,54 @@ def test_wheel_vs_body_idle_ends_when_a_command_returns():
     # t=0.0 is warm-up; t=1.0 is still driven, t=2.0 and t=3.0 are uncommanded.
     assert summary["fractions"]["held"] == pytest.approx(0.3333, abs=1e-4)
     assert summary["fractions"]["idle"] == pytest.approx(0.6667, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# The environment handed to a shell must be internally consistent: a
+# CYCLONEDDS_URI that names a missing file makes every ROS node abort with
+# "can't open configuration file" / "failed to create domain".  That broke whole
+# runs (RViz and the spawner included) and no test covered it.
+# ---------------------------------------------------------------------------
+
+def test_cyclonedds_config_is_written_when_missing(tmp_path):
+    target = tmp_path / "cyclonedds.xml"
+    assert not target.exists()
+    written = session.ensure_cyclonedds_config(target)
+    assert written == target
+    assert target.is_file()
+    text = target.read_text()
+    assert "<CycloneDDS>" in text and "<Discovery>" in text
+
+
+def test_cyclonedds_config_does_not_overwrite_an_existing_file(tmp_path):
+    target = tmp_path / "cyclonedds.xml"
+    target.write_text("<!-- operator tuned -->\n<CycloneDDS/>\n")
+    session.ensure_cyclonedds_config(target)
+    assert "operator tuned" in target.read_text()
+
+
+def test_session_environment_cyclonedds_uri_points_at_a_real_file():
+    path, record = session.create_session(199, label="unit-test-dds")
+    try:
+        environment = session.session_environment(record)
+        uri = environment["CYCLONEDDS_URI"]
+        assert uri.startswith("file://")
+        target = Path(uri[len("file://"):])
+        assert target.is_file(), "session env hands out CYCLONEDDS_URI for a missing file"
+        assert "<CycloneDDS>" in target.read_text()
+    finally:
+        path.unlink()
+
+
+def test_session_environment_repairs_a_deleted_config():
+    """A cleaned log/ must not poison the next shell: env() recreates it."""
+    path, record = session.create_session(198, label="unit-test-dds-repair")
+    try:
+        target = Path(session.CYCLONEDDS_URI[len("file://"):])
+        if target.exists():
+            target.unlink()
+        assert not target.exists()
+        environment = session.session_environment(record)
+        assert Path(environment["CYCLONEDDS_URI"][len("file://"):]).is_file()
+    finally:
+        path.unlink()

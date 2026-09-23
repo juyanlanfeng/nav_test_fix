@@ -25,6 +25,41 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 SESSION_DIR = ROOT / "log" / "pb_sim_sessions"
 CYCLONEDDS_URI = "file://%s/log/cyclonedds.xml" % ROOT
+
+# The URI above is only usable if the file it names exists: CycloneDDS refuses to
+# create a domain when it cannot open the configuration, so every ROS node in a
+# shell that exported the URI aborts with "can't open configuration file" and
+# `rmw_create_node: failed to create domain`, including RViz and the spawner.  The
+# file used to be assumed rather than created, which broke whole runs whenever
+# log/ was cleaned.  It is now written on demand.
+CYCLONEDDS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<!-- Local discovery configuration handed out by tools/pb_sim/session.py.
+     CycloneDDS reads this through CYCLONEDDS_URI=%s.
+     If this file is missing, every ROS node in a shell that exported that URI
+     fails with "can't open configuration file" and rmw_create_node aborts. -->
+<CycloneDDS>
+  <Domain Id="any">
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>100</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>
+""" % CYCLONEDDS_URI
+
+
+def ensure_cyclonedds_config(path=None):
+    """Write the DDS configuration named by CYCLONEDDS_URI if it is not there.
+
+    Returns the path.  Called before a session is created and before the
+    environment is emitted, so a shell can never be handed a URI whose target does
+    not exist.  Existing content is left untouched: an operator may have tuned it
+    deliberately.
+    """
+    target = Path(path) if path else Path(CYCLONEDDS_URI[len("file://"):])
+    if not target.is_file():
+        write_atomic(target, CYCLONEDDS_XML)
+    return target
 ROS_HOME = str(ROOT / "log" / "ros_accept_home")
 
 TRUTHY = {"1", "true", "yes", "on"}
@@ -74,6 +109,7 @@ def create_session(domain, label="run", partition=None, session_dir=None):
     """
     directory = Path(session_dir) if session_dir else SESSION_DIR
     directory.mkdir(parents=True, exist_ok=True)
+    ensure_cyclonedds_config()
     domain = int(domain)
     session_id = new_session_id(label)
     partition = partition or "pb_%s" % session_id
@@ -119,12 +155,19 @@ def load_session(path):
 
 
 def session_environment(record):
-    """The complete, mutually consistent environment of one session."""
+    """The complete, mutually consistent environment of one session.
+
+    Self-healing: the returned CYCLONEDDS_URI is only handed out once its target
+    exists, so a cleaned log/ cannot produce an environment that kills every node.
+    """
+    uri = record.get("cyclonedds_uri", CYCLONEDDS_URI)
+    if uri.startswith("file://"):
+        ensure_cyclonedds_config(uri[len("file://"):])
     return {
         "ROS_DOMAIN_ID": str(record["domain"]),
         "ROS_LOCALHOST_ONLY": "1",
         "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp",
-        "CYCLONEDDS_URI": record.get("cyclonedds_uri", CYCLONEDDS_URI),
+        "CYCLONEDDS_URI": uri,
         "IGN_PARTITION": record["partition"],
         "GZ_PARTITION": record["partition"],
         "ROS_HOME": record.get("ros_home", ROS_HOME),

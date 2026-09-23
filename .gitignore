@@ -25,16 +25,16 @@ venv/
 **/rmuc2026_field_visual.stl
 
 # ---- 第三方教程场景的 LFS 数据(本地对象已丢失,仅剩指针) ----
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres/maps/*.ply
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto/maps/*.ply
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/worlds/*.sdf
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/worlds/*.sdf
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/models/*/model.config
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/models/*/model.sdf
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_ceres_sim/models/*/meshes/*
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/models/*/model.config
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/models/*/model.sdf
-meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_pluto_sim/models/*/meshes/*
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_ceres/maps/*.ply
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_pluto/maps/*.ply
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_ceres_sim/worlds/*.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_pluto_sim/worlds/*.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_ceres_sim/models/*/model.config
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_ceres_sim/models/*/model.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_ceres_sim/models/*/meshes/*
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_pluto_sim/models/*/model.config
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_pluto_sim/models/*/model.sdf
+meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_pluto_sim/models/*/meshes/*
 
 # ---- 其他 ----
 field/get-pip.py

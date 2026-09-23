@@ -163,7 +163,7 @@ python3 "$ROOT/tools/pb_sim/session.py" env "$SESSION" > "$REPORT_DIR/environmen
   echo "assets_taken_wall=$(wall_time)"
   sha256sum "$ROOT/meshnav_demo_ws/src/pb_vehicle_adapter/models/pb_navigation_robot.sdf" \
             "$ROOT/meshnav_demo_ws/src/pb_vehicle_adapter/urdf/pb_navigation_robot.urdf" \
-            "$ROOT/meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/maps/rmuc2026_field.ply" 2>/dev/null
+            "$ROOT/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2026_field.ply" 2>/dev/null
   ls -l --time-style=full-iso "$MAP_CACHE" 2>/dev/null
   sha256sum "$MAP_CACHE" 2>/dev/null
   find "$ROOT/third_party" -name 'libMecanumDrive2*' -exec sha256sum {} \; 2>/dev/null

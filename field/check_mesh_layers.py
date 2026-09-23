@@ -31,7 +31,7 @@ import trimesh
 
 
 ROOT = Path("/home/rainple/nav_test")
-DEFAULT_PLY = (ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials"
+DEFAULT_PLY = (ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials"
                / "maps/rmuc2026_field.ply")
 DEFAULT_OUT = ROOT / "field/converted_rmuc2026/tunnel_clearance/mesh_layers_report.json"
 

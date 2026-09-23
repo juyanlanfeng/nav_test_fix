@@ -14,7 +14,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-PKG = ROOT/'meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim'
+PKG = ROOT/'meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

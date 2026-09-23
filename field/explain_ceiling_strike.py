@@ -25,7 +25,7 @@ from check_tunnel_clearance import (CEILING_MIN_GAP, hits_below, rpy_matrix,
 
 
 ROOT = Path("/home/rainple/nav_test")
-DEFAULT_STL = (ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim"
+DEFAULT_STL = (ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim"
                / "models/rmuc2026_field/meshes/rmuc2026_field_collision.stl")
 DEFAULT_URDF = ROOT / "meshnav_demo_ws/src/pb_vehicle_adapter/urdf/pb_navigation_robot.urdf"
 

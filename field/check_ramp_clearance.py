@@ -37,7 +37,7 @@ import numpy as np
 import trimesh
 
 ROOT = Path(__file__).resolve().parents[1]
-SIM_PKG = ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim"
+SIM_PKG = ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim"
 COLLISION_STL = SIM_PKG / "models/rmuc2026_field/meshes/rmuc2026_field_collision.stl"
 ROBOT_XACRO = SIM_PKG / "urdf/ceres.urdf.xacro"
 

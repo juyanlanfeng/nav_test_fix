@@ -36,7 +36,7 @@ import trimesh
 
 ROOT = Path("/home/rainple/nav_test")
 DEFAULT_STL = (
-    ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim"
+    ROOT / "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim"
     / "models/rmuc2026_field/meshes/rmuc2026_field_collision.stl"
 )
 DEFAULT_PROFILE = ROOT / "meshnav_demo_ws/src/pb_vehicle_adapter/config/pb_vehicle_profile.yaml"

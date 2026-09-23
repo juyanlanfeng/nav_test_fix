@@ -701,13 +701,13 @@ field/.step_convert_venv/bin/python field/build_multilevel_nav_mesh.py \
 cd /home/rainple/nav_test
 
 cp -a field/converted_rmuc2026/gazebo/models/rmuc2026_field/. \
-  meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim/models/rmuc2026_field/
+  meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim/models/rmuc2026_field/
 
 cp field/converted_rmuc2026/gazebo/worlds/rmuc2026_field.sdf \
-  meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim/worlds/rmuc2026_field.sdf
+  meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim/worlds/rmuc2026_field.sdf
 
 cp field/converted_rmuc2026/mesh_planner/rmuc2026_field.ply \
-  meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/maps/rmuc2026_field.ply
+  meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2026_field.ply
 
 cd meshnav_demo_ws
 source /opt/ros/humble/setup.bash
@@ -790,7 +790,7 @@ MeshNav 和 JIE 内部地图表达不同：一个沿三角曲面规划，一个�
 source /home/rainple/nav_test/meshnav_demo_ws/install/setup.bash
 ros2 pkg prefix mesh_navigation_tutorials_sim
 rg -n "visual.stl|ambient|diffuse|collision.stl" \
-  /home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials_sim/models/rmuc2026_field/model.sdf
+  /home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials_sim/models/rmuc2026_field/model.sdf
 ```
 
 当前 visual 必须指向 `_visual.stl`，collision 必须指向 `_collision.stl`，并存在显式 material。仍为纯白时，先用 Ctrl-C 干净结束旧 Gazebo，再确认没有遗留实例：
@@ -807,7 +807,7 @@ pgrep -af 'ign gazebo|gz sim|ruby.*ignition'
 
 ```bash
 python3 /home/rainple/nav_test/field/verify_rmuc_project.py
-sha256sum /home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/maps/rmuc2026_field.ply
+sha256sum /home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2026_field.ply
 sha256sum /home/rainple/nav_test/field/converted_rmuc2026/jie_nav/rmuc2026_field.pcd
 ```
 

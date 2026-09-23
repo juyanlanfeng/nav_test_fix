@@ -108,7 +108,7 @@ def main():
             "meshnav_demo_ws/src/pb_terminal_controller",
             "meshnav_demo_ws/src/pb_vehicle_adapter",
             "meshnav_demo_ws/src/mesh_navigation/mesh_controller",
-            "meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/config",
+            "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/config",
             "tools/pb_sim",
             "doc",
         ]
@@ -129,7 +129,7 @@ def main():
                 })
         # Deliberately hash the configuration the runs depend on.
         for name in ("meshnav_demo_ws/rmuc2026_pb_low_navigation.h5",
-                     "meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/maps/rmuc2026_field.ply"):
+                     "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2026_field.ply"):
             path = ROOT / name
             if path.is_file():
                 manifest.setdefault("runtime_assets", []).append({

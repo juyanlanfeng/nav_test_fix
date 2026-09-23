@@ -141,7 +141,7 @@ mesh_nav 不是把 PLY 先转成 OctoMap。它保留三角网格拓扑，建立�
 打开文件：
 
 ```text
-/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/
+/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/
 mesh_navigation_tutorials_sim/config/ros_gazebo_bridge.yaml
 ```
 
@@ -257,7 +257,7 @@ source /opt/ros/humble/setup.bash
 source /home/rainple/nav_test/meshnav_demo_ws/install/setup.bash
 
 ros2 run jie_octomap pcd_to_octomap_node --ros-args \
-  -p pcd_file:=/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/maps/floor_is_lava.ply \
+  -p pcd_file:=/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/floor_is_lava.ply \
   -p frame_id:=map \
   -p octomap_topic:=/octomap \
   -p resolution:=0.2 \
@@ -544,7 +544,7 @@ source /opt/ros/humble/setup.bash
 source /home/rainple/nav_test/meshnav_demo_ws/install/setup.bash
 
 rviz2 \
-  -d /home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/rviz/default.rviz \
+  -d /home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/rviz/default.rviz \
   --ros-args \
   -r __node:=mesh_rviz \
   -p use_sim_time:=true
@@ -588,7 +588,7 @@ ros2 param set /move_base_flex mesh_controller.ang_vel_factor 1.0
 如果当前实验只要求比较全局路径并验证到达位置，可在下面的配置文件中把 `angle_tolerance: 0.8` 临时改成 `angle_tolerance: 3.14`，然后重启公共 launch：
 
 ```text
-/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/
+/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/
 mesh_navigation_tutorials/config/mbf_mesh_nav.yaml
 ```
 
@@ -659,7 +659,7 @@ ros2 topic echo /octomap --once \
 ```bash
 ros2 topic pub --once \
   /pcd_file_cmd std_msgs/msg/String \
-  "{data: '/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/maps/floor_is_lava.ply'}"
+  "{data: '/home/rainple/nav_test/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/floor_is_lava.ply'}"
 ```
 
 ### 9.4 点击点和 QoS

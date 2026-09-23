@@ -494,7 +494,7 @@ sequenceDiagram
 
 ### D. 仿真启动与参数适配
 
-入口：[pb_meshnav.launch.py](../meshnav_demo_ws/src/pb_vehicle_adapter/launch/pb_meshnav.launch.py)、[服务器 launch](../meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/launch/mbf_mesh_navigation_server_launch.py)、[导航 YAML](../meshnav_demo_ws/src/mesh_navigation_tutorials/mesh_navigation_tutorials/config/mbf_mesh_nav.yaml)。
+入口：[pb_meshnav.launch.py](../meshnav_demo_ws/src/pb_vehicle_adapter/launch/pb_meshnav.launch.py)、[服务器 launch](../meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/launch/mbf_mesh_navigation_server_launch.py)、[导航 YAML](../meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/config/mbf_mesh_nav.yaml)。
 
 本地启动层连接 PB 仿真、MeshNav、RViz 与就绪检查；提供复用已有仿真的入口，并切换速度源；传入地图、独立 HDF5 工作文件、车辆几何相关参数和控制器选择。
 
