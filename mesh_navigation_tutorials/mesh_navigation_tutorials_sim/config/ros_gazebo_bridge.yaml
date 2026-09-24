@@ -4,7 +4,7 @@
   direction: GZ_TO_ROS
 
 - ros_topic_name: "/odom"
-  gz_topic_name: "model/robot/odometry"
+  gz_topic_name: "robot/odometry"
   ros_type_name: "nav_msgs/msg/Odometry"
   gz_type_name: "ignition.msgs.Odometry"
   direction: GZ_TO_ROS
@@ -43,7 +43,7 @@
 # Mesh Nav publishes 'TwistStamped'
 - ros_topic_name: "/cmd_vel"
   ros_type_name: "geometry_msgs/msg/TwistStamped"
-  gz_topic_name: "/model/robot/cmd_vel"
+  gz_topic_name: "/robot/cmd_vel"
   gz_type_name: "ignition.msgs.Twist"
   direction: ROS_TO_GZ
 

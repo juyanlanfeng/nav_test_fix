@@ -49,8 +49,8 @@ def generate_launch_description():
         DeclareLaunchArgument("drive_model", default_value="legacy", choices=["legacy", "pi"]),
         DeclareLaunchArgument(
             "mesh_map_working_path",
-            default_value="/home/rainple/nav_test/meshnav_demo_ws/rmuc2026_pb_navigation.h5",
-            description="PB-specific MeshMap cache; never reuse the Ceres profile cache.",
+            default_value="/home/rainple/nav_test/meshnav_demo_ws/rmuc2026_pb_tunnel_relief_removed.h5",
+            description="PB-specific MeshMap cache for the repaired RMUC2026 map; never reuse an older cache.",
         ),
         DeclareLaunchArgument(
             "startup_timeout_s", default_value="120",

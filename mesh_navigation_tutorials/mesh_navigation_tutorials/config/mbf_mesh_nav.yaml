@@ -79,6 +79,7 @@ move_base_flex:
       ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
                                  # 纯旋转卡死（本项目 -Y 曾因此失败）。
       lin_vel_factor: 1.0        # 线速度增益倍率。
+      holonomic: true
       # 注意：这个类还有两个决定底盘类型的关键参数，本文件没写 → 用类默认值：
       #   holonomic   = false   # false=按非完整底盘（只能前进+转向）处理：
       #                         #   当向量场与车头夹角 > max_angle 时线速度强制为 0，
@@ -153,8 +154,8 @@ move_base_flex:
 
       roughness:
         type: 'mesh_layers/RoughnessLayer'
-        combination_weight: 1.0
-        threshold: 0.8
+        combination_weight: 0.3
+        threshold: 1.0
         #   ↑ 局部粗糙度超过此值即判致命。粗糙度反映"这块面起伏多大"，
         #     用来挡碎石/不平地面。调小=只走平整面。
         # 同样未设置 radius（计算粗糙度的邻域半径，用类默认值）。
