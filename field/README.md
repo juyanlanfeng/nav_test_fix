@@ -5,6 +5,10 @@
 `STP → mesh` 和 `PCD → mesh`。原始模型与转换产物**不纳入
 git**,详见下文[资源文件说明](#资源文件说明)。
 
+本文的 MeshNav 启动步骤使用 `/home/rainple/nav_test/mesh_navigation_tutorials`
+这个 ROS 2 工作空间：源码在其 `src/` 下，地图预览入口在工作空间的 `launch/` 下，
+构建与环境加载都从该工作空间执行。
+
 ## 代码与文档清单
 
 | 文件 | 用途 |
@@ -23,6 +27,8 @@ git**,详见下文[资源文件说明](#资源文件说明)。
 | `test_pcd_to_nav_mesh.py` | 测试:PCD 解析、降采样与分层 mesh |
 | `test_conversion_metadata.py` | 测试:干净重建后的 metadata 闭环与兼容性 |
 | `test_verify_rmuc_project.py` | 测试:H5 与几何/参数输入的新鲜度判定 |
+| `../mesh_navigation_tutorials/launch/meshnav_map_test.launch.py` | 无仿真的 MeshNav 地图预览入口 |
+| `../mesh_navigation_tutorials/src/mesh_navigation_tutorials/scripts/` | 原始 PCD 显示与仅规划工具 |
 | [`../doc/CONVERSION_AND_USAGE.md`](../doc/CONVERSION_AND_USAGE.md) | 转换流程与使用说明(详细文档) |
 | `requirements-conversion.txt` | 转换脚本的 Python 依赖 |
 | `RMUC2026_step_report.json` | STP 转换报告(元数据) |
@@ -90,6 +96,12 @@ MeshNav 的 PLY 是**可行驶表面**，不是整栋建筑的外观网格：墙
 虽然几何连通，但两端距离网格边界分别约 0 和 0.10 m，小于 0.22 m 内切半径；
 GetPath 返回 `Predecessor of the goal is not set! No path found!`。
 
+目前另有从 `field/pcd/Map_converted.pcd` 生成的 `goudongv2.ply` 候选地图。
+当前的 `site_v2.pcd_to_mesh.json` 已被一次 `goudongv2.ply` 转换覆盖：报告中
+`output_ply` 指向 `goudongv2.ply`，筛选后有 17 个连通块，
+`meshnav_getpath_tested` 为 `false`。因此不能拿上面的 `site_v2` 路线或报告
+作为 `goudongv2` 的规划验收；使用报告时先核对 `source_pcd`、`output_ply` 和哈希。
+
 ### 1. 输入要求与检查
 
 输入必须是 PCD v0.7，至少包含 `x y z`。支持 `DATA ascii` 和未压缩的
@@ -118,13 +130,19 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py inspect \
 
 ### 2. 生成分层 PLY
 
-通用地面机器人示例：
+本节命令中的 `field/...` 都相对于项目根目录 `/home/rainple/nav_test`。
+如果当前在 `field/pcd`，先执行 `cd /home/rainple/nav_test`；
+否则 Bash 会把 `field/...` 错误地解释成 `field/pcd/field/...`。
+
+下面命令重建前述 `site_v2.ply`。它使用 `map.pcd`，不是
+`Map_converted.pcd`：
 
 ```bash
+cd /home/rainple/nav_test
 field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
-  /path/to/map.pcd \
+  field/pcd/map.pcd \
   field/converted_pcd/mesh_planner/site_v2.ply \
-  --voxel-m 0.025 \
+  --voxel-m 0.01 \
   --normal-k 24 \
   --grid-m 0.10 \
   --max-slope-deg 35 \
@@ -135,13 +153,19 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
   --report field/converted_pcd/mesh_planner/site_v2.pcd_to_mesh.json
 ```
 
+重建 `goudongv2.ply` 时，将上述输入改为 `field/pcd/Map_converted.pcd`，
+输出改为 `field/converted_pcd/mesh_planner/goudongv2.ply`，并将报告单独写到
+`field/converted_pcd/mesh_planner/goudongv2.pcd_to_mesh.json`，避免再次覆盖
+`site_v2` 的报告。当前磁盘上的 `site_v2.pcd_to_mesh.json` 实际描述的是
+`goudongv2.ply`；重建 `site_v2` 后才可重新用它核对 `site_v2`。
+
 参数含义：
 
 | 参数 | 含义 |
 |---|---|
 | `--scale` | 输入单位到米的倍率；米为 1，毫米为 0.001 |
 | `--translate X Y Z` | 缩放后施加的米制平移，用于对齐 map 原点，不负责旋转配准 |
-| `--voxel-m` | 法向估计前的三维体素降采样；应小于最窄坡面/通道特征 |
+| `--voxel-m` | 三维体素边长（米）。同一体素内的点取坐标平均值，保留一个代表点；若输入没有有效法向，再用这些代表点估计法向。`0.025` 即 2.5 cm；增大会减少点数和计算量，但可能抹掉窄坡面、薄边缘或相邻表面的细节。这不是输出 PLY 的网格间距，后者由 `--grid-m` 控制。 |
 | `--normal-k` | 无有效法向时，每点局部 PCA 的邻点数 |
 | `--grid-m` | 输出导航网格分辨率；点间距大于格子时会破碎，增大后也必须检查是否误连墙/缺口 |
 | `--max-slope-deg` | 可行驶面最大坡度 |
@@ -163,9 +187,11 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
 所以导航面 Z 范围显著小于场景范围是正常的；但 4 块之间无法规划跨块路线。
 `meshnav_getpath_tested: false` 表示转换本身没有通过规划验收。
 
-先对**具体**起终点做几何预检，Z 要填真实导航面高度：
+先对**具体**起终点做几何预检，Z 要填真实导航面高度。以下坐标仅适用于
+`site_v2.ply`：
 
 ```bash
+cd /home/rainple/nav_test
 field/.step_convert_venv/bin/python field/check_nav_mesh_route.py \
   field/converted_pcd/mesh_planner/site_v2.ply \
   --start 4.5 -1.2 -0.48 --goal 5.2 -0.7 -0.48 \
@@ -189,26 +215,25 @@ field/.step_convert_venv/bin/python field/check_nav_mesh_route.py \
 ### 3. 导入 MeshNav 并在 RViz 查看路线（不启动仿真）
 
 下面只启动 MeshNav 地图服务器、原始点云显示和 RViz，不启动 Gazebo 或机器人。
-可直接使用 `field` 输出的绝对路径，无需复制进地图包或覆盖旧 `site.ply`。
-每次换 PLY 都用新的 H5 文件名，防止读到旧缓存：
+地图 PLY 可直接使用 `field` 中的绝对路径，无需复制进 ROS 包。先从当前
+`mesh_navigation_tutorials` 工作空间构建；教程包会安装顶层 `launch/` 中的
+`meshnav_map_test.launch.py`、两个辅助工具和地图预览 RViz 配置：
 
 ```bash
-# 新增 launch 和仅规划工具后，需要构建一次
 source /opt/ros/humble/setup.bash
-cd /home/rainple/nav_test/meshnav_demo_ws
-colcon build --symlink-install --packages-select mesh_navigation_tutorials
+cd /home/rainple/nav_test/mesh_navigation_tutorials
+colcon build --symlink-install --cmake-clean-cache --packages-up-to mesh_navigation_tutorials
 source install/setup.bash
 ```
 
-终端一启动地图服务器和 RViz。`mesh_map_working_path` 必须是可写的 `.h5` 路径，首次启动
-会创建缓存，大地图可能需要等待一段时间：
+先用已做过几何预检和 GetPath 的 `site_v2.ply` 复现局部路线。终端一运行：
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/meshnav_demo_ws/install/setup.bash
+source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
 ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
   mesh_map_path:=/home/rainple/nav_test/field/converted_pcd/mesh_planner/site_v2.ply \
-  mesh_map_working_path:=/home/rainple/nav_test/meshnav_demo_ws/site_pcd_v2_navigation.h5 \
+  mesh_map_working_path:=/home/rainple/nav_test/mesh_navigation_tutorials/site_v2_navigation.h5 \
   source_pcd_path:=/home/rainple/nav_test/field/pcd/map.pcd \
   publish_source_cloud:=true \
   static_inscribed_radius:=0.22 \
@@ -216,22 +241,48 @@ ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
   height_diff_threshold:=0.20
 ```
 
+这三个代价参数会分别传入 `mesh_map.static_inflation.inscribed_radius`、
+`mesh_map.static_inflation.inflation_radius` 和 `mesh_map.height_diff.threshold`。
+`mesh_map_working_path` 必须是可写的、与当前地图及参数配套的 `.h5` 文件；
+不要复用 RMUC 场地的 `rmuc2026_field.h5`。首次加载可能需要一段时间。
+
 RViz 的 `Source PCD (scene only)` 应显示墙、柱、顶面，`MeshNav surface (planning)`
 只显示可行驶候选面。两层必须重合对齐。如果转换时用了 `--scale` 或 `--translate`，
 启动时还需给出同样的 `source_cloud_scale` / `source_cloud_translate_x/y/z`；
-否则叠加视图会错位。两点请先通过上面的几何预检，再在终端二下发 GetPath：
+否则叠加视图会错位。上面的 `site_v2` 两点已通过几何预检，可在终端二下发 GetPath：
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/meshnav_demo_ws/install/setup.bash
+source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
 ros2 run mesh_navigation_tutorials meshnav_plan_only \
   --start 4.5 -1.2 -0.48 \
   --goal   5.2 -0.7 -0.48
 ```
 
-这组示例已实测输出 `PATH_READY poses=16`，RViz 的 `GetPath result` 会显示白色
-路线。该进程每秒重发一次路径以保持显示；按 Ctrl+C 只关闭路线发布，地图服务器仍运行。
+这组 `site_v2` 示例在当前工作空间、上述三个代价参数下实测输出
+`PATH_READY poses=3`（2026-09-24）；旧配置曾输出 16 个路径点，点数会随参数和
+规划器版本变化。RViz 的 `GetPath result` 会显示白色路线。该进程每秒重发一次路径
+以保持显示；按 Ctrl+C 只关闭路线发布，地图服务器仍运行。
 换起终点时关闭终端二并重新执行即可。
+
+要查看当前 `goudongv2.ply`，先停止上面的地图服务，再用**另一份缓存**启动：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
+ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
+  mesh_map_path:=/home/rainple/nav_test/field/converted_pcd/mesh_planner/goudongv2.ply \
+  mesh_map_working_path:=/home/rainple/nav_test/mesh_navigation_tutorials/goudongv2_navigation.h5 \
+  source_pcd_path:=/home/rainple/nav_test/field/pcd/Map_converted.pcd \
+  publish_source_cloud:=true \
+  static_inscribed_radius:=0.22 \
+  static_inflation_radius:=0.70 \
+  height_diff_threshold:=0.20
+```
+
+`goudongv2.ply` 目前只有转换产物，没有通过 GetPath 验收。先在它自己的导航面上
+选择起终点，分别运行第 2 节的几何预检和 `meshnav_plan_only`；不要照搬
+`site_v2` 的坐标或 `PATH_READY` 结论。
 
 这里不要点击 RViz 的 `Mesh Goal`：仓库原有面板会使用 TF 中的当前机器人位姿，并在规划成功
 后自动发送 `ExePath`。无机器人模式没有该 TF，也不应执行路径。`meshnav_plan_only` 固定使用
@@ -245,7 +296,8 @@ ros2 topic echo --once /move_base_flex/mesh
 ros2 topic echo --once /move_base_flex/path
 ```
 
-H5 缓存与 PLY 及导航参数绑定。更换 PLY、坡度/膨胀参数后必须删除旧 H5，让 MeshNav 重新生成。
+H5 缓存与 PLY 及导航参数绑定。更换 PLY、坡度/膨胀参数后必须换用新的缓存文件名，
+或先移走旧 H5，让 MeshNav 重新生成。
 `static_inscribed_radius` 应接近机器人占地内切半径，`static_inflation_radius` 应不小于它；
 `height_diff_threshold` 是地形高差致命阈值。这三个值必须按待测试机器人配置，不能为了得到一条
 路线无限缩小。若只是排查地图拓扑，可以临时减小膨胀半径做对照，但该结果不能作为通行验收。
@@ -257,6 +309,7 @@ H5 缓存与 PLY 及导航参数绑定。更换 PLY、坡度/膨胀参数后必�
 先运行脚本测试：
 
 ```bash
+cd /home/rainple/nav_test
 PYTHONPATH=field field/.step_convert_venv/bin/python -m unittest \
   field/test_pcd_to_nav_mesh.py
 ```

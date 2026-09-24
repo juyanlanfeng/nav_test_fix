@@ -1,0 +1,37 @@
+pb_vehicle:
+  ros__parameters:
+    # Low-clearance test vehicle (doc/PB_LOW_CLEARANCE_VEHICLE_PLAN.md): the
+    # gimbal, armor and projectile container are gone, so the body is a 0.36 x
+    # 0.24 x 0.13 m box on the original wheels with the sensors mounted low.
+    #
+    # The two disc-based planners (MeshNav's `inscribed_radius`, which is set
+    # lethal around every lethal vertex, and JIE's `robot_radius_xy` cylinder) see
+    # the 0.5656 x 0.4332 m footprint as a circle, so the radius here is the
+    # footprint's inscribed radius = half width, i.e.
+    # `pb_vehicle_adapter.robot_envelope.footprint_radii()["inscribed"]`
+    # = 0.216608 m (the circumscribed radius is 0.356223 m).
+    #
+    # Why the inscribed radius: a straight corridor of width w leaves a band of
+    # w - 2 r for the path, so with r = half width the disc model refuses exactly
+    # the corridors that the rectangular body cannot pass.  A smaller r would let
+    # the planner plan through gaps the body cannot fit, a larger one rejects the
+    # 0.85 m RMUC2026 tunnels that the vehicle physically drives through with
+    # 0.19 - 0.21 m per side (doc section 9.5).  Turning in place stays
+    # optimistic, because no disc restores the body's corners; that is a model
+    # limitation, not an argument for a bigger disc.
+    static_inscribed_radius: 0.216608
+    obstacle_inscribed_radius: 0.216608
+    static_inflation_radius: 0.70
+    obstacle_inflation_radius: 0.70
+    robot_height: 0.23
+    base_to_chassis_xyz: [0.0, 0.0, 0.076]
+    base_to_chassis_xyzw: [0.0, 0.0, 0.0, 1.0]
+    # Collision bounding box in base_footprint (metres), union of every URDF
+    # collision primitive after applying joint and collision rotations.
+    # Regenerate with:
+    #   python3 -m pb_vehicle_adapter.robot_envelope
+    # test/test_robot_envelope.py fails if these values drift from the model.
+    # Single source of truth for the DDDMR cuboid (config/dddmr_rmuc2026.yaml);
+    # do not maintain a second set of dimensions.
+    collision_aabb_min: [-0.2828, -0.216607, 0.000198]
+    collision_aabb_max: [0.2828, 0.216607, 0.226]

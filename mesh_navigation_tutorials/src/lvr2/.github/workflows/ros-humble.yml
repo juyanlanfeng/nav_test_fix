@@ -1,0 +1,33 @@
+name: humble
+on:
+  push:
+    branches:
+      - 'main'
+      - 'develop'
+      - 'humble'
+  pull_request:
+    branches:
+      - 'main'
+      - 'develop'
+      - 'humble'
+  workflow_dispatch:
+    branches:
+      - '*'
+jobs:
+  ros_humble:
+    name: humble
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Checkout LVR2
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compile LVR2 in ROS 2 humble WS
+        uses: 'ros-industrial/industrial_ci@master'
+        env:
+          ROS_DISTRO: humble
+          ROS_REPO: main
+          AFTER_SCRIPT: cd ~/target_ws && ./build/lvr2/bin/lvr2_reconstruct src/lvr2/dat/scan.pts

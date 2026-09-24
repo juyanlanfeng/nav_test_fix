@@ -32,24 +32,24 @@ With the hand-modelled examples we particularly aim to support low-end computers
 
 ## Requirements and Installation
 
-You need a working ROS 2 installation. We target `humble` at the moment. Go into a ROS 2 workspace's source directory `cd $YOUR_ROS_WS/src`. Then clone the tutorial code 
+This checkout is a ROS 2 workspace. Its packages and source dependencies are under
+`src/`; each package keeps its own `launch/` directory so `ros2 launch <package>
+<file>` can find the installed launch files. The workspace-level `launch/`
+directory contains standalone launch files.
+
+With ROS 2 Humble installed, run the following commands from this directory:
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone git@github.com:naturerobots/mesh_navigation_tutorials.git
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install --cmake-clean-cache --packages-up-to mesh_navigation_tutorials
+source install/setup.bash
 ```
 
-> [!NOTE] 
-> If you forget to add `GIT_LFS_SKIP_SMUDGE=1` before `git clone` and you have Git LFS installed, all available maps will be downloaded during the clone. This may take a while. But than you skip all the Git LFS commands later.
-
-Get the tutorial's ROS 2 dependencies
-* Clone source dependencies: Run `vcs import --input mesh_navigation_tutorials/source_dependencies.yaml` in your ROS 2 workspace source directory.
-* Get packaged dependencies: Run `rosdep install --from-paths . --ignore-src -r -y` from within your ROS 2 workspace source directory.
-
-Build: Go to workspace root `cd $YOUR_ROS_WS` and run 
-
-```bash
-colcon build --packages-up-to mesh_navigation_tutorials
-```
+To build the vehicle adapter as well, use `colcon build --symlink-install
+--cmake-clean-cache --packages-up-to pb_vehicle_adapter` from the same directory.
+The cache reset is needed once after moving packages into `src/` because the
+existing CMake caches still point to the former source locations.
 
 ## Run the Examples
 
@@ -109,8 +109,6 @@ Find more details about the environments here: [Virtual Worlds](https://naturero
 * [Rmagine](https://github.com/uos/rmagine) ([ICRA 2023](https://doi.org/10.1109/ICRA48891.2023.10161388))
 * [MICP-L](https://github.com/uos/rmcl) ([IROS 2024](https://arxiv.org/abs/2210.13904))
 * [RMCL](https://github.com/uos/rmcl)
-
-
 
 
 

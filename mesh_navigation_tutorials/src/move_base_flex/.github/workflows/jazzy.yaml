@@ -1,0 +1,18 @@
+name: Jazzy CI
+
+on:
+  push:
+    branches:
+      - 'jazzy'
+      - 'ros2'
+  pull_request:
+  workflow_dispatch:
+    branches:
+      - '*'
+
+jobs:
+  jazzy_build_and_test:
+    uses: naturerobots/github_automation_public/.github/workflows/ros_ci.yaml@cc7fc175054179167e8a676c0e5e11bbbfe60d4e
+    secrets: inherit
+    with:
+      ros_distro: jazzy

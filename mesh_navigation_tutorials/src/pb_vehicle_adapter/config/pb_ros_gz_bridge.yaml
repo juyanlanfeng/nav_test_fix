@@ -1,0 +1,79 @@
+- ros_topic_name: /clock
+  gz_topic_name: /clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: ignition.msgs.Clock
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /pb/odom_raw
+  gz_topic_name: /robot/odometry
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: ignition.msgs.Odometry
+  direction: GZ_TO_ROS
+
+# Single same-step source of navigation truth (pb_gazebo_sim_support /
+# ChassisTruth): 6-DOF chassis pose in the world frame and twist in the chassis
+# frame, stamped with the simulation time of the step that produced them.  This
+# is the only odometry the ground-truth adapter consumes; /pb/odom_raw and the two
+# pose streams stay recorded for comparison only.
+- ros_topic_name: /pb_sim/chassis_truth
+  gz_topic_name: /pb_sim/chassis_truth
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: ignition.msgs.Odometry
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /imu/data
+  gz_topic_name: /robot/imu
+  ros_type_name: sensor_msgs/msg/Imu
+  gz_type_name: ignition.msgs.IMU
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /scan
+  gz_topic_name: /robot/scan
+  ros_type_name: sensor_msgs/msg/LaserScan
+  gz_type_name: ignition.msgs.LaserScan
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /cloud
+  gz_topic_name: /robot/cloud/points
+  ros_type_name: sensor_msgs/msg/PointCloud2
+  gz_type_name: ignition.msgs.PointCloudPacked
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /camera/image_raw
+  gz_topic_name: /robot/camera/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /camera/camera_info
+  gz_topic_name: /robot/camera/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: ignition.msgs.CameraInfo
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /joint_states
+  gz_topic_name: /robot/joint_states
+  ros_type_name: sensor_msgs/msg/JointState
+  gz_type_name: ignition.msgs.Model
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /pb/poses_raw
+  gz_topic_name: /model/robot/pose
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: ignition.msgs.Pose_V
+  direction: GZ_TO_ROS
+
+# SceneBroadcaster's dynamic world poses provide the model-level 3-D truth.
+# The model PosePublisher above provides robot->chassis; the adapter composes
+# both instead of using MecanumDrive2's yaw-only odometry.
+- ros_topic_name: /pb/world_poses_raw
+  gz_topic_name: /world/rmuc2026_field/dynamic_pose/info
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: ignition.msgs.Pose_V
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /pb/cmd_vel_safe
+  gz_topic_name: /robot/cmd_vel
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: ignition.msgs.Twist
+  direction: ROS_TO_GZ

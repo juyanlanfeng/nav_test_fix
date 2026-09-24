@@ -1,0 +1,67 @@
+.configured
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+# Precompiled Headers
+*.gch
+*.pch
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+# Fortran module files
+*.mod
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+# Executables
+*.exe
+*.out
+*.appi
+# Build Folder
+build/
+bin/
+dat/
+doc/
+.idea/
+.codelite/
+cmake-build-debug/
+cmake-build-release/
+
+# Debian packaging
+deb-build*/
+debian/files
+debian/*.substvars
+debian/*.log
+debian/.debhelper/
+debian/debhelper-build-stamp
+# package directories
+debian/lvr2/
+debian/lvr2-cuda/
+debian/liblvr2*/
+debian/lvr2-*/
+
+# QT Creator files
+/*.config
+/*.creator
+/*.files
+/*.includes
+/*.user
+/*.orig
+
+# IDE files
+.vscode/
+.settings
+.project
+.cproject
+# Clang cache
+.cache
+
+# RiVLib lib path
+ext/rivlib/
+texture_*.jpg
+texture_*.ppm
