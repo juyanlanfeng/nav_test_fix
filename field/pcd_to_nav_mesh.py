@@ -328,12 +328,19 @@ def convert(args: argparse.Namespace) -> None:
         f"({len(faces)}/{raw_face_count} triangles). "
         "This PLY contains walkable candidates, not scene walls/ceiling."
     )
+    if not len(selected):
+        raise RuntimeError(
+            "component filtering removed every triangle: largest component "
+            f"{areas.max():.6f} m^2 is below --min-component-area-m2 "
+            f"{args.min_component_area_m2:g}; only {raw_face_count} raw triangle(s) "
+            f"formed with --grid-m {args.grid_m:g} and --min-points-per-cell "
+            f"{args.min_points_per_cell}. Check point spacing and try a coarser "
+            "grid before reducing the area threshold."
+        )
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     mesh.remove_unreferenced_vertices()
     mesh.merge_vertices(digits_vertex=6)
     mesh.remove_unreferenced_vertices()
-    if len(mesh.faces) == 0:
-        raise RuntimeError("component filtering removed every triangle")
     args.output_ply.parent.mkdir(parents=True, exist_ok=True)
     mesh.export(args.output_ply, file_type="ply")
     output_hash = sha256_file(args.output_ply)

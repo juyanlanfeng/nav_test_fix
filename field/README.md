@@ -134,30 +134,36 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py inspect \
 如果当前在 `field/pcd`，先执行 `cd /home/rainple/nav_test`；
 否则 Bash 会把 `field/...` 错误地解释成 `field/pcd/field/...`。
 
-下面命令重建前述 `site_v2.ply`。它使用 `map.pcd`，不是
-`Map_converted.pcd`：
+下面命令从 `Map_converted.pcd` 生成独立的 `guidong_v3.ply` 候选地图，
+不会覆盖前面的 `site_v2.ply`：
 
 ```bash
 cd /home/rainple/nav_test
 field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
-  field/pcd/map.pcd \
-  field/converted_pcd/mesh_planner/site_v2.ply \
+  field/pcd/Map_converted.pcd \
+  field/converted_pcd/mesh_planner/guidong_v3.ply \
   --voxel-m 0.01 \
   --normal-k 24 \
   --grid-m 0.10 \
-  --max-slope-deg 35 \
-  --layer-merge-m 0.06 \
-  --robot-height-m 0.35 \
-  --min-points-per-cell 1 \
+  --max-slope-deg 40 \
+  --layer-merge-m 0.05 \
+  --robot-height-m 0.05 \
+  --min-points-per-cell 2 \
   --min-component-area-m2 1.0 \
-  --report field/converted_pcd/mesh_planner/site_v2.pcd_to_mesh.json
+  --report field/converted_pcd/mesh_planner/guidong_v3.pcd_to_mesh.json
 ```
 
-重建 `goudongv2.ply` 时，将上述输入改为 `field/pcd/Map_converted.pcd`，
-输出改为 `field/converted_pcd/mesh_planner/goudongv2.ply`，并将报告单独写到
-`field/converted_pcd/mesh_planner/goudongv2.pcd_to_mesh.json`，避免再次覆盖
-`site_v2` 的报告。当前磁盘上的 `site_v2.pcd_to_mesh.json` 实际描述的是
-`goudongv2.ply`；重建 `site_v2` 后才可重新用它核对 `site_v2`。
+对这份点云实测：302071 个有效点，最近邻间距中位数约 0.023 m。
+`--grid-m 0.01 --min-points-per-cell 2` 只生成 1 个原始三角形，
+随后被 1 m² 面积阈值过滤，故报 `component filtering removed every triangle`。
+上述 0.10 m 网格保留 5 个面积至少 1 m² 的连通块，共 9898 个三角形；
+最大块约 42.86 m²。输出仅覆盖部分源点云范围，**不能据此认定整个沟洞可导航**。
+若要保留更多零散表面，可降低每格点数或面积阈值，但必须检查噪声、净空和错误连通，
+不能通过把阈值调小来代替路径验收。
+
+每次转换都要为 PLY 和 JSON 使用配套且独立的文件名；检查报告里的
+`source_pcd`、`output_ply` 和哈希。旧 `site_v2.pcd_to_mesh.json` 曾被其他转换覆盖，
+不能拿它代表 `site_v2.ply`。`guidong_v3` 也尚未通过 MeshNav GetPath 验收。
 
 参数含义：
 
@@ -232,13 +238,13 @@ source install/setup.bash
 source /opt/ros/humble/setup.bash
 source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
 ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
-  mesh_map_path:=/home/rainple/nav_test/field/converted_pcd/mesh_planner/site_v2.ply \
+  mesh_map_path:=/home/rainple/nav_test/field/converted_pcd/mesh_planner/guidong_v3.ply \
   mesh_map_working_path:=/home/rainple/nav_test/mesh_navigation_tutorials/site_v2_navigation.h5 \
-  source_pcd_path:=/home/rainple/nav_test/field/pcd/map.pcd \
+  source_pcd_path:=/home/rainple/nav_test/field/pcd/Map_converted.pcd \
   publish_source_cloud:=true \
-  static_inscribed_radius:=0.22 \
-  static_inflation_radius:=0.70 \
-  height_diff_threshold:=0.20
+  static_inscribed_radius:=0.15 \
+  static_inflation_radius:=0.15 \
+  height_diff_threshold:=0.10
 ```
 
 这三个代价参数会分别传入 `mesh_map.static_inflation.inscribed_radius`、
