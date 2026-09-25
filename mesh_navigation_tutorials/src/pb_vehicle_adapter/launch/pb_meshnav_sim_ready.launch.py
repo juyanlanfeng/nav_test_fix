@@ -1,3 +1,5 @@
+# 单独测试车辆、雷达、运动，或让多个导航框架复用同一仿真
+
 """Practical simulation preset; not a hardware configuration or full acceptance."""
 from pathlib import Path
 
@@ -11,7 +13,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     defaults = {
         "start_gazebo_gui": "True", "start_rviz": "True",
-        "spawn_rendering_sensors": "False",
+        "spawn_rendering_sensors": "True",
         "spawn_x": "-1.9", "spawn_y": "5.95", "spawn_z": "0.25",
         "spawn_yaw_deg": "0",
         "mesh_map_working_path": str(Path.home() / ".ros/pb_practical_navigation.h5"),

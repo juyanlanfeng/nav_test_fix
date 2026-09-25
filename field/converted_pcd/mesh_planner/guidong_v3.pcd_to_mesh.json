@@ -30,137 +30,133 @@
     333
   ],
   "max_slope_deg": 40.0,
-  "layer_merge_m": 0.05,
+  "layer_merge_m": 0.01,
   "robot_height_m": 0.05,
-  "min_points_per_cell": 2,
+  "min_points_per_cell": 3,
   "surface_orientation_policy": "unoriented_abs_normal_z",
   "headroom_policy": "next_point_surface_layer",
   "layer_matching_policy": "reciprocal_nearest_height",
   "walkable_normal_points": 106473,
   "occupied_xy_cells": 14135,
-  "headroom_layers_rejected": 0,
-  "cells_with_navigation_surface": 11290,
-  "cells_with_multiple_layers": 2547,
-  "maximum_layers_per_cell": 6,
-  "raw_vertices": 14319,
-  "raw_triangles": 16804,
-  "raw_components": 675,
-  "raw_projected_area_m2": 84.02000000000416,
-  "largest_component_area_m2": 46.710000000004435,
-  "selected_projected_area_m2": 56.080000000004354,
+  "headroom_layers_rejected": 1007,
+  "cells_with_navigation_surface": 7221,
+  "cells_with_multiple_layers": 747,
+  "maximum_layers_per_cell": 4,
+  "raw_vertices": 8019,
+  "raw_triangles": 8855,
+  "raw_components": 366,
+  "raw_projected_area_m2": 44.27499999999858,
+  "largest_component_area_m2": 35.414999999998635,
+  "selected_projected_area_m2": 36.769999999998625,
   "components_by_area": [
     {
-      "projected_area_m2": 46.710000000004435,
-      "triangles": 9342
+      "projected_area_m2": 35.414999999998635,
+      "triangles": 7083
     },
     {
-      "projected_area_m2": 2.669999999999961,
-      "triangles": 534
+      "projected_area_m2": 1.3549999999999902,
+      "triangles": 271
     },
     {
-      "projected_area_m2": 2.0549999999999917,
-      "triangles": 411
+      "projected_area_m2": 0.21499999999999866,
+      "triangles": 43
     },
     {
-      "projected_area_m2": 1.7999999999999925,
-      "triangles": 360
+      "projected_area_m2": 0.21499999999999866,
+      "triangles": 43
     },
     {
-      "projected_area_m2": 1.6499999999999826,
-      "triangles": 330
+      "projected_area_m2": 0.20499999999999846,
+      "triangles": 41
     },
     {
-      "projected_area_m2": 1.1949999999999912,
-      "triangles": 239
+      "projected_area_m2": 0.18999999999999878,
+      "triangles": 38
     },
     {
-      "projected_area_m2": 0.9399999999999928,
-      "triangles": 188
+      "projected_area_m2": 0.17999999999999858,
+      "triangles": 36
     },
     {
-      "projected_area_m2": 0.8849999999999962,
-      "triangles": 177
+      "projected_area_m2": 0.16499999999999937,
+      "triangles": 33
     },
     {
-      "projected_area_m2": 0.8749999999999962,
-      "triangles": 175
+      "projected_area_m2": 0.1649999999999989,
+      "triangles": 33
     },
     {
-      "projected_area_m2": 0.814999999999995,
-      "triangles": 163
+      "projected_area_m2": 0.15999999999999967,
+      "triangles": 32
     },
     {
-      "projected_area_m2": 0.6949999999999961,
-      "triangles": 139
+      "projected_area_m2": 0.15999999999999892,
+      "triangles": 32
     },
     {
-      "projected_area_m2": 0.609999999999996,
-      "triangles": 122
+      "projected_area_m2": 0.14999999999999897,
+      "triangles": 30
     },
     {
-      "projected_area_m2": 0.599999999999996,
-      "triangles": 120
+      "projected_area_m2": 0.14500000000000005,
+      "triangles": 29
     },
     {
-      "projected_area_m2": 0.5799999999999967,
-      "triangles": 116
+      "projected_area_m2": 0.13499999999999868,
+      "triangles": 27
     },
     {
-      "projected_area_m2": 0.5049999999999959,
-      "triangles": 101
+      "projected_area_m2": 0.10999999999999908,
+      "triangles": 22
     },
     {
-      "projected_area_m2": 0.48999999999999794,
-      "triangles": 98
+      "projected_area_m2": 0.10499999999999976,
+      "triangles": 21
     },
     {
-      "projected_area_m2": 0.4849999999999961,
-      "triangles": 97
+      "projected_area_m2": 0.09999999999999927,
+      "triangles": 20
     },
     {
-      "projected_area_m2": 0.45999999999999636,
-      "triangles": 92
+      "projected_area_m2": 0.08999999999999934,
+      "triangles": 18
     },
     {
-      "projected_area_m2": 0.43999999999999634,
-      "triangles": 88
+      "projected_area_m2": 0.08999999999999934,
+      "triangles": 18
     },
     {
-      "projected_area_m2": 0.4099999999999986,
-      "triangles": 82
+      "projected_area_m2": 0.08999999999999886,
+      "triangles": 18
     }
   ],
   "selected_components": [
-    96,
-    217,
-    346,
-    405,
-    461,
-    540
+    59,
+    273
   ],
   "min_component_area_m2": 1.0,
   "output_ply": "/home/rainple/nav_test/field/converted_pcd/mesh_planner/guidong_v3.ply",
-  "output_ply_sha256": "e6d0c6441dc365a69fe49f097b59a60fd31195f510185543eb2781e673631801",
-  "output_vertices": 6362,
-  "output_triangles": 11216,
+  "output_ply_sha256": "f9461291035330b5ef4061b6e1b5958e945216e373af89b46c7e3c01a7f7c06a",
+  "output_vertices": 4147,
+  "output_triangles": 7354,
   "output_bounds_m": [
     [
-      -4.200000000000037,
-      -4.200000000000021,
-      -0.8885088264942169
+      -2.700000000000042,
+      -3.4000000000000234,
+      -0.8631448447704315
     ],
     [
-      9.699999999999916,
-      3.799999999999951,
-      3.1192564964294434
+      7.49999999999992,
+      3.199999999999953,
+      -0.30614763498306274
     ]
   ],
   "output_role": "candidate_walkable_surface_only",
   "meshnav_getpath_tested": false,
-  "boundary_edges": 1608,
+  "boundary_edges": 1032,
   "nonmanifold_edges": 0,
-  "xy_locations_with_multiple_layers": 283,
-  "maximum_face_slope_deg": 39.8356825783311,
+  "xy_locations_with_multiple_layers": 26,
+  "maximum_face_slope_deg": 39.75423207169691,
   "limitations": [
     "PCD has no free-space rays; missing points are unknown, not free space.",
     "Unoriented normals cannot by themselves distinguish a floor top from a ceiling underside.",

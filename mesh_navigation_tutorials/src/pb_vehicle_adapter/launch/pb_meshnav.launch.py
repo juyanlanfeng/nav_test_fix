@@ -1,3 +1,5 @@
+# 正常运行 MeshNav，或采用“仿真、导航分两个终端”
+
 """Run MeshNav with the PB2025 vehicle and one selected velocity source."""
 
 import os

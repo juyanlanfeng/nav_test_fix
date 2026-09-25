@@ -146,9 +146,9 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
   --normal-k 24 \
   --grid-m 0.10 \
   --max-slope-deg 40 \
-  --layer-merge-m 0.05 \
+  --layer-merge-m 0.01 \
   --robot-height-m 0.05 \
-  --min-points-per-cell 2 \
+  --min-points-per-cell 3 \
   --min-component-area-m2 1.0 \
   --report field/converted_pcd/mesh_planner/guidong_v3.pcd_to_mesh.json
 ```
@@ -243,7 +243,7 @@ ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
   source_pcd_path:=/home/rainple/nav_test/field/pcd/Map_converted.pcd \
   publish_source_cloud:=true \
   static_inscribed_radius:=0.15 \
-  static_inflation_radius:=0.15 \
+  static_inflation_radius:=0.10 \
   height_diff_threshold:=0.10
 ```
 

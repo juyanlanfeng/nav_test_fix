@@ -165,7 +165,7 @@
               <max_angle>6.2831852</max_angle>
             </horizontal>
             <vertical>
-              <samples>32</samples>
+              <samples>16</samples>
               <min_angle>-0.12217304764</min_angle>
               <max_angle>0.90757121104</max_angle>
             </vertical>
@@ -243,7 +243,7 @@
     <xmacro_block name="pb_low_rplidar_a2" prefix="front_" parent="chassis"
       pose="-0.10 0 0.11 0 0 0" update_rate="10" samples="400" visualize="true" />
     <xmacro_block name="pb_low_livox" prefix="front_" parent="chassis"
-      pose="0.10 0 0.11 0 0 0" update_rate="20" samples="1875" />
+      pose="0.10 0 0.11 0 0 0" update_rate="20" samples="720" />
     <xmacro_block name="pb_low_industrial_camera" prefix="front_" parent="chassis"
       pose="0.16 0 0.065 0 0 0" update_rate="30" horizontal_fov="1" width="1920" height="1080" />
 
