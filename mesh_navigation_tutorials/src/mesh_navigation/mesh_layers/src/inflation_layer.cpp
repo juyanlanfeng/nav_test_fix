@@ -72,14 +72,6 @@ bool InflationLayer::readLayer()
 bool InflationLayer::writeLayer()
 {
   RCLCPP_INFO_STREAM(get_logger(), "Saving " << riskiness_.numValues() << " riskiness values to map file...");
-  // An obstacle layer legitimately has no values until the first obstacle is
-  // observed. HDF5 cannot create a chunked dataset with a zero dimension, so
-  // treat the empty dynamic layer as successfully persisted by omission.
-  if (riskiness_.numValues() == 0)
-  {
-    RCLCPP_INFO_STREAM(get_logger(), "Layer is empty; skipping HDF5 dataset creation.");
-    return true;
-  }
   // Since this is called by the map we do not need to check if this is successful
   const auto map = map_ptr_.lock();
 
@@ -279,6 +271,9 @@ bool InflationLayer::waveFrontUpdate(
   if (!std::isfinite(u3tmp))
     return false;
 
+  if (u3tmp > max_distance || u3tmp >= u3)
+    return false;
+
   const float d31 = u3tmp - u1;
   const float d32 = u3tmp - u2;
 
@@ -302,22 +297,18 @@ bool InflationLayer::waveFrontUpdate(
     vector_map.insert(v3h, (std::as_const(vector_map).get(v3h).value_or(zero) + dir).normalized());
   }
 
-  if (u3tmp < u3)
+  distances.insert(v3h, static_cast<float>(u3tmp));
+
+  if (u1 != 0 || u2 != 0)
   {
-    distances.insert(v3h, static_cast<float>(u3tmp));
-
-    if (u1 != 0 || u2 != 0)
-    {
-      // The zero vector is needed for the same reason as above
-      const mesh_map::Vector zero;
-      const mesh_map::Vector& vec_a = std::as_const(vector_map).get(v1h).value_or(zero);
-      const mesh_map::Vector& vec_b = std::as_const(vector_map).get(v2h).value_or(zero);
-      vector_map.insert(v3h, (vec_a * d31 + vec_b * d32).normalized());
-    }
-
-    return u1 <= max_distance && u2 <= max_distance;
+    // The zero vector is needed for the same reason as above
+    const mesh_map::Vector zero;
+    const mesh_map::Vector& vec_a = std::as_const(vector_map).get(v1h).value_or(zero);
+    const mesh_map::Vector& vec_b = std::as_const(vector_map).get(v2h).value_or(zero);
+    vector_map.insert(v3h, (vec_a * d31 + vec_b * d32).normalized());
   }
-  return false;
+
+  return true;
 }
 
 float InflationLayer::fading(const float distance)
@@ -409,6 +400,32 @@ void InflationLayer::waveCostInflation(
     pq.insert(vH, 0);
   }
 
+  // Seed the wavefront from each lethal vertex. Face updates require two fixed
+  // vertices, so direct edge distances are needed to start from an isolated
+  // lethal vertex or from the end of a lethal strip.
+  for (const auto lethal_vh : lethals)
+  {
+    for (const auto halfedge: pmp_mesh.halfedges(lethal_vh)) {
+        const auto neighbor_vh = pmp_mesh.to_vertex(halfedge);
+        if (fixed[neighbor_vh]) {
+            continue;
+        }
+        float inf = INFINITY;
+        const float candidate = edge_distances.get(halfedge.edge()).value_or(inf);
+        if (!std::isfinite(candidate) || candidate > inflation_radius)
+        {
+            continue;
+        }
+
+        const float current = distances_.get(neighbor_vh).value_or(inf);
+        if (candidate < current)
+        {
+            distances_.insert(neighbor_vh, candidate);
+            pq.insert(neighbor_vh, candidate);
+        }
+    }
+  }
+
   RCLCPP_DEBUG(get_logger(), "Initialized wave inflation");
   RCLCPP_DEBUG(get_logger(), "Starting inflation wave front propagation");
 
@@ -455,7 +472,7 @@ void InflationLayer::waveCostInflation(
         else if (fixed[a] && fixed[b] && !fixed[c])
         {
           // c is free
-          if (waveFrontUpdate(*mesh, distances_, vector_out, config_.inflation_radius, edge_distances, a, b, c))
+          if (waveFrontUpdate(*mesh, distances_, vector_out, inflation_radius, edge_distances, a, b, c))
           {
             pq.insert(c, distances_[c]);
           }
@@ -463,7 +480,7 @@ void InflationLayer::waveCostInflation(
         else if (fixed[a] && !fixed[b] && fixed[c])
         {
           // b is free
-          if (waveFrontUpdate(*mesh, distances_, vector_out, config_.inflation_radius, edge_distances, c, a, b))
+          if (waveFrontUpdate(*mesh, distances_, vector_out, inflation_radius, edge_distances, c, a, b))
           {
             pq.insert(b, distances_[b]);
           }
@@ -471,7 +488,7 @@ void InflationLayer::waveCostInflation(
         else if (!fixed[a] && fixed[b] && fixed[c])
         {
           // a if free
-          if (waveFrontUpdate(*mesh, distances_, vector_out, config_.inflation_radius, edge_distances, b, c, a))
+          if (waveFrontUpdate(*mesh, distances_, vector_out, inflation_radius, edge_distances, b, c, a))
           {
             pq.insert(a, distances_[a]);
           }
@@ -549,17 +566,14 @@ mesh_map::Vector InflationLayer::vectorAt(const lvr2::VertexHandle& vH)
   }
 
   if (distance > config_.inflation_radius)
-  {
-    return mesh_map::Vector();
-  }
 
-  // Inflation radius
-  if (distance > config_.inscribed_radius)
-  {
-    float alpha =
-        (sqrt(distance) - config_.inscribed_radius) / (config_.inflation_radius - config_.inscribed_radius) * M_PI;
-    return vec * config_.inscribed_value * (cos(alpha) + 1) / 2.0;
-  }
+    // Inflation radius
+    if (distance > config_.inscribed_radius)
+    {
+      float alpha =
+          (sqrt(distance) - config_.inscribed_radius) / (config_.inflation_radius - config_.inscribed_radius) * M_PI;
+      return vec * config_.inscribed_value * (cos(alpha) + 1) / 2.0;
+    }
 
   // Inscribed radius
   if (distance > 0)

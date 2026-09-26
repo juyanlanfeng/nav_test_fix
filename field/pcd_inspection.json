@@ -1,33 +1,29 @@
 {
-  "source_pcd": "/home/rainple/nav_test/field/pcd/all_raw_points_converted.pcd",
-  "source_sha256": "206cf569c3d81dd671376a71ed65f3df11c9cd781035e5b4a52d3cba7a96b137",
+  "source_pcd": "/home/rainple/nav_test/field/pcd/guidong_pointlio_converted.pcd",
+  "source_sha256": "e83f033f49bc9843c973178868c79e17aa46db5197a1c43c0721a6be1323dc0b",
   "encoding": "binary",
   "fields": [
     "x",
     "y",
     "z",
-    "intensity",
-    "normal_x",
-    "normal_y",
-    "normal_z",
-    "curvature"
+    "intensity"
   ],
-  "points_declared": 11745401,
-  "header_bytes": 255,
-  "trailing_padding_bytes": 3841,
-  "finite_points": 11745401,
+  "points_declared": 1538749,
+  "header_bytes": 192,
+  "trailing_padding_bytes": 3904,
+  "finite_points": 1538749,
   "nonfinite_points_removed": 0,
   "valid_supplied_normals": 0,
   "bounds": {
     "min": [
-      -12.87552261352539,
-      -10.433188438415527,
-      -1.121287226676941
+      -12.895151138305664,
+      -12.076557159423828,
+      -1.737815499305725
     ],
     "max": [
-      20.096128463745117,
-      13.163020133972168,
-      3.8811850547790527
+      21.016826629638672,
+      21.351091384887695,
+      3.9277429580688477
     ]
   }
 }
