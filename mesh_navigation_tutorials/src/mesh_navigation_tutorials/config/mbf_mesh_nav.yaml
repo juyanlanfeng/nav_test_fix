@@ -179,7 +179,7 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['static_combination']
         combination_weight: 1.0
-        inflation_radius: 1.0
+        inflation_radius: 0.8
         #   ↑ **外圈**半径 [m]：距离致命顶点超过此值就不再产生任何代价。
         #     决定"障碍的影响范围有多大"——只影响代价高低，不决定能否通过。
         inscribed_radius: 0.15
@@ -207,7 +207,7 @@ move_base_flex:
         # 【实时障碍层】由传感器点云动态更新；静态地图没有的障碍靠它避开。
         type: 'mesh_layers/ObstacleLayer'
         combination_weight: 1.0
-        robot_height: 0.23
+        robot_height: 0.10
         #   ↑ 车体高度 [m]：高于它的点云被当作"可以从下面穿过"而忽略，
         #     低于它的才算障碍。**必须按真实车高设**。
         #     ⚠ 当前 0.7 是教程车（含桅杆）的值；本车碰撞高度只有 0.215 m。
@@ -224,8 +224,8 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['obstacle']
         combination_weight: 1.0
-        inflation_radius: 0.5      # 外圈，同 static_inflation
-        inscribed_radius: 0.2      # 内圈，同 static_inflation（车体尺寸）
+        inflation_radius: 0.3      # 外圈，同 static_inflation
+        inscribed_radius: 0.1      # 内圈，同 static_inflation（车体尺寸）
         lethal_value: .inf
         inscribed_value: 1.0
         repulsive_field: false
