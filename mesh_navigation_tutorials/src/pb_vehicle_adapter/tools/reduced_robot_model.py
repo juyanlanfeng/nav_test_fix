@@ -3,7 +3,7 @@
 
     python3 tools/reduced_robot_model.py models/pb_navigation_robot.sdf
 
-Used by pb_vehicle_sim.launch.py (`spawn_rendering_sensors:=False`) through a
+Used by meshnav_pb_sim.launch.py (`spawn_rendering_sensors: "False"`) through a
 launch Command substitution, so no reduced SDF is checked in.  See
 pb_vehicle_adapter/robot_model.py for why the sensors are removed.
 """

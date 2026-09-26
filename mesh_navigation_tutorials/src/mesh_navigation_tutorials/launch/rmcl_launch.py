@@ -30,115 +30,63 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
-
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import PathJoinSubstitution, PythonExpression, LaunchConfiguration
-
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+import yaml
 
 
-def generate_launch_description():
+def _create_actions(context):
+    mesh_share = get_package_share_directory("mesh_navigation_tutorials")
+    rmcl_params_file = os.path.join(mesh_share, "config", "rmcl.yaml")
+    with open(os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml"), encoding="utf-8") as stream:
+        nav_config = yaml.safe_load(stream)
+    nav_options = nav_config["meshnav_launch"]["ros__parameters"]
+    mbf_params = nav_config["move_base_flex"]["ros__parameters"]
 
-    # path to this pkg
-    pkg_mesh_navigation_tutorials = get_package_share_directory("mesh_navigation_tutorials")
+    requested_map = LaunchConfiguration("map_name").perform(context)
+    map_name = requested_map or nav_options["map_name"]
+    localization = LaunchConfiguration("localization").perform(context)
+    localization = localization or nav_options["localization"]
+    segmentation = LaunchConfiguration("obstacle_segmentation").perform(context)
+    segmentation = segmentation or nav_options["obstacle_segmentation"]
 
-    # Loading a map files with the following extension
-    mesh_nav_map_ext = ".ply"
+    if not map_name:
+        raise ValueError("RMCL requires map_name or meshnav_launch.map_name")
+    if localization not in ("ground_truth", "rmcl_micpl"):
+        raise ValueError("Unsupported localization: " + localization)
+    if segmentation not in ("none", "ground_truth", "rmcl_seg"):
+        raise ValueError("Unsupported obstacle_segmentation: " + segmentation)
 
-    available_map_names = [
-        f[:-len(mesh_nav_map_ext)]
-        for f in os.listdir(os.path.join(pkg_mesh_navigation_tutorials, "maps"))
-        if f.endswith(mesh_nav_map_ext)
-    ]
+    # 显式指定 map_name 时使用该地图；否则读取 MBF YAML 中的网格路径。
+    map_file = os.path.join(mesh_share, "maps", map_name + ".ply")
+    if not requested_map:
+        map_file = mbf_params["mesh_map"]["mesh_file"]
+    use_sim_time = mbf_params["use_sim_time"]
 
-    # Launch arguments
-    launch_args = [
-        DeclareLaunchArgument(
-            "map_name",
-            description="Name of the map to be used for navigation"
-            + '(see mesh_navigation_tutorials\' "maps" directory).',
-            default_value=LaunchConfiguration("world_name"),
-            choices=available_map_names,
-        ),
-        DeclareLaunchArgument(
-            "localization",
-            description="How the robot shall localize itself",
-            default_value="ground_truth",
-            choices=["ground_truth", "rmcl_micpl"],
-        ),
-        DeclareLaunchArgument(
-            "obstacle_segmentation",
-            description="Method to segment LiDAR point for obstacles",
-            default_value="none",
-            choices=["none", "ground_truth", "rmcl_seg"],
-        ),
-        DeclareLaunchArgument(
-            "start_rviz",
-            description="Whether rviz shall be started.",
-            default_value="True",
-            choices=["True", "False"],
-        ),
-    ]
-
-    map_name = LaunchConfiguration("map_name")
-    localization = LaunchConfiguration("localization")
-    obstacle_segmentation = LaunchConfiguration("obstacle_segmentation")
-
-
-    rmcl_config = PathJoinSubstitution([
-                    pkg_mesh_navigation_tutorials, 
-                    "config", 
-                    "rmcl.yaml"])
-
-    mesh_map_path = PathJoinSubstitution([
-                    pkg_mesh_navigation_tutorials,
-                    "maps",
-                    PythonExpression(['"', map_name, '.ply"']),
-                ])
-
-    # conversion
-    rmcl_pc2_to_o1dn_conv = Node(
-        condition=IfCondition(PythonExpression([
-            '"', localization, '" == "rmcl_micpl"', 
-            ' or ',
-            '"', obstacle_segmentation, '" == "rmcl_seg"'])),
+    conversion = Node(
         package="rmcl_ros",
         executable="conv_pc2_to_o1dn_node",
         name="rmcl_lidar3d_conversion",
         output="screen",
-        remappings=[
-            ("input", "/cloud"),
-            ("output", "/rmcl_inputs/cloud"),
-        ],
-        parameters=[
-            rmcl_config,
-            {
-                "use_sim_time": True
-            },
-        ],
+        remappings=[("input", "/cloud"), ("output", "/rmcl_inputs/cloud")],
+        parameters=[rmcl_params_file, {"use_sim_time": use_sim_time}],
+        condition=IfCondition(str(localization == "rmcl_micpl" or segmentation == "rmcl_seg")),
     )
-
-    # MICP-L (Mesh ICP localization) from RMCL package
-    rmcl_micpl = Node(
-        condition=IfCondition(PythonExpression(['"', localization, '" == "rmcl_micpl"'])),
+    micp_localization = Node(
         package="rmcl_ros",
         executable="micp_localization_node",
         name="rmcl_micpl",
         output="screen",
-        parameters=[
-            rmcl_config,
-            {
-                "use_sim_time": True,
-                "map_file": mesh_map_path
-            },
-        ],
+        parameters=[rmcl_params_file, {
+            "use_sim_time": use_sim_time,
+            "map_file": map_file,
+        }],
+        condition=IfCondition(str(localization == "rmcl_micpl")),
     )
-
-    # MICP-L (Mesh ICP localization) from RMCL package
-    rmcl_seg = Node(
-        condition=IfCondition(PythonExpression(['"', obstacle_segmentation, '" == "rmcl_seg"'])),
+    obstacle_segmentation = Node(
         package="rmcl_ros",
         executable="o1dn_map_segmentation_embree_node",
         name="rmcl_seg",
@@ -148,21 +96,28 @@ def generate_launch_description():
             ("outlier_map", "~/outlier_map"),
             ("outlier_scan", "obstacle_points"),
         ],
-        parameters=[
-            rmcl_config,
-            {
-                "use_sim_time": True,
-                "map_file": mesh_map_path
-            },
-        ],
+        parameters=[rmcl_params_file, {
+            "use_sim_time": use_sim_time,
+            "map_file": map_file,
+        }],
+        condition=IfCondition(str(segmentation == "rmcl_seg")),
     )
+    return [conversion, micp_localization, obstacle_segmentation]
 
-    return LaunchDescription(
-        launch_args
-        + [
-            rmcl_pc2_to_o1dn_conv,
-            rmcl_micpl,
-            rmcl_seg
-        ]
-    )
 
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            "map_name", default_value=LaunchConfiguration("world_name", default=""),
+            description="Map name; empty uses mbf_mesh_nav.yaml",
+        ),
+        DeclareLaunchArgument(
+            "localization", default_value="",
+            description="Localization mode; empty uses YAML or ground_truth",
+        ),
+        DeclareLaunchArgument(
+            "obstacle_segmentation", default_value="",
+            description="Segmentation mode; empty uses YAML or none",
+        ),
+        OpaqueFunction(function=_create_actions),
+    ])

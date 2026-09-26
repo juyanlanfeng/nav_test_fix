@@ -26,20 +26,29 @@
 #       - PLY 的顶点 / 三角形 / 坐标变化
 #       - 本文件里任何 MeshLayer 参数变化
 #       - MeshMap / HDF5 格式实现变化
-#    操作（注意 h5 路径是相对启动时 CWD 的）：
-#       cd /home/rainple/nav_test/mesh_navigation_tutorials
-#       mv rmuc2026_field.h5 rmuc2026_field.h5.bak.$(date +%Y%m%d-%H%M%S)
-#       ros2 launch ... world_name:=rmuc2026_field  # 首启从 PLY 重算
+#    操作：备份或删除 mesh_map.mesh_working_file 指向的 HDF5 文件，然后重启导航；
+#    首次启动会从 mesh_map.mesh_file 指向的 PLY 重算。
+#       ros2 launch pb_vehicle_adapter meshnav_pb_sim.launch.py
 #       ros2 service call /move_base_flex/save_map std_srvs/srv/Trigger "{}"
 #
 # 【footprint 只通过膨胀层进入规划】MeshNav 没有"车体"这个概念，它把车近似成一个
 #   **无方向的圆盘**：
 #       inscribed_radius = 圆盘半径（贴到致命顶点就判死）
 #   对长方体 footprint，应取**内切半径 = 半宽**，不是外接半径。参考值
-#   （config/pb_vehicle_profile.yaml，本车 0.5656 × 0.4332 m）：
-#       static_inscribed_radius = 0.216608   # 内切 = 半宽
+#   （本车 0.5656 × 0.4332 m）：
+#       inscribed_radius = 0.216608   # 内切 = 半宽
 #       （外接半径为 0.356223，用它会把 0.4 m 宽的通道全判死）
 # =============================================================================
+
+# 仅供启动文件读取的导航选项；meshnav_launch 不是 ROS 节点。
+meshnav_launch:
+  ros__parameters:
+    map_name: 'rmuc2026_field'       # RMCL 地图名；对应 maps/<名称>.ply。
+    localization: 'ground_truth'     # 定位方式：ground_truth 或 rmcl_micpl。
+    obstacle_segmentation: 'rmcl_seg'  # 障碍点云来源：none、ground_truth 或 rmcl_seg。
+    start_rviz: 'True'               # 是否打开导航 RViz。
+    meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
+    startup_timeout_s: '180'         # 导航就绪检查最长等待时间，秒；0 为单次检查。
 
 move_base_flex:
   ros__parameters:
@@ -76,21 +85,14 @@ move_base_flex:
     planner_frequency: 1.0       # 【动态避障开关】执行期间周期性重规划 [Hz]；0 = 关闭（这就是默认值）
 
     # ---- 局部控制器（把"往哪走"变成速度指令）--------------------------------
-    controllers: ['mesh_controller']
-    # controllers: ['pb_terminal_controller']
+    controllers: ['mesh_controller']  # PB 仿真使用的 MBF 控制器；可改为 mesh_controller。
     mesh_controller:
       type: 'mesh_controller/MeshController'
       ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
                                  # 纯旋转卡死（本项目 -Y 曾因此失败）。
       lin_vel_factor: 1.0        # 线速度增益倍率。
-      holonomic: true
-      # 注意：这个类还有两个决定底盘类型的关键参数，本文件没写 → 用类默认值：
-      #   holonomic   = false   # false=按非完整底盘（只能前进+转向）处理：
-      #                         #   当向量场与车头夹角 > max_angle 时线速度强制为 0，
-      #                         #   只能原地转。完整底盘（mecanum/omni）应设为 true。
-      #   max_angle   = 20.0    # 上面那个夹角阈值 [°]。
-      # 本车是 mecanum 却用默认的 false，等于放弃横移能力——若出现"只转不走"，
-      # 先查这里。
+      holonomic: true         # 改用 mesh_controller 时，是否按全向底盘控制。
+      # max_angle 未设置时使用控制器默认值，单位为度。
 
     controller_patience: 2.0     # 单次控制步超时 [s]。
     controller_max_retries: 4    # 控制失败重试次数。
@@ -103,17 +105,13 @@ move_base_flex:
 
     mesh_map:
       # ---- 输入与缓存 -------------------------------------------------------
-      # In this examples, `mesh_file` is set dynamically from the launch file.
-      # you can also set it statically:
-      # mesh_file: '.../parking_garage.ply'
-      #   ↑ 可通行曲面（三角形网格）的输入路径。由 launch 动态设置成
-      #     <share>/maps/<map_name>.ply。
+      mesh_file: '/home/rainple/nav_test/mesh_navigation_tutorials/src/mesh_navigation_tutorials/maps/rmuc2026_field.ply'
+      #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
-      # storage
-      # mesh_working_file: 'parking_garage.h5'
-      #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。由 launch 设为
-      #     "<map_name>.h5"（**相对 CWD**）。它只是缓存，不是源地图；
+      mesh_working_file: '/home/rainple/.ros/pb_practical_navigation.h5'
+      #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
+      #     mesh_map_working_path 覆盖。它只是缓存，不是源地图；
       #     参数或 PLY 一变就必须重算（见文件头《缓存失效规则》）。
       mesh_working_part: 'mesh'
       #   ↑ 写入 HDF5 时使用的网格名。
@@ -141,7 +139,7 @@ move_base_flex:
         #     vertex_cost = Σ (combination_weight × 该层 vertex_cost)
         threshold: 0.1
         #   ↑ 【可通行性直接相关】相邻顶点高度差超过此值 [m] 即标为**致命**，
-        #     即"台阶/落差超过 0.2 m 的地方不可通行"。调小=更保守（小台阶也挡），
+        #     即"台阶/落差超过 0.08 m 的地方不可通行"。调小=更保守（小台阶也挡），
         #     调大=允许更大落差。注意这**不是**坡度阈值，坡度在建图侧。
         # 本文件未设置 radius：计算高度差时用的邻域半径（用类默认值）。
         # 想控制"多大范围内的落差才算台阶"，可以显式加 radius: <m>。
@@ -179,15 +177,13 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['static_combination']
         combination_weight: 1.0
-        inflation_radius: 0.8
+        inflation_radius: 0.70
         #   ↑ **外圈**半径 [m]：距离致命顶点超过此值就不再产生任何代价。
         #     决定"障碍的影响范围有多大"——只影响代价高低，不决定能否通过。
         inscribed_radius: 0.15
         #   ↑ **内圈**半径 [m]：贴到致命顶点这么近就取"内圈代价"（见下），
         #     等价于判死。**这才是决定窄通道能否通过的那个参数**，
         #     应取车体 footprint 的**内切半径（半宽）**。
-        #     ⚠ 当前 0.4 是按教程大车设的；本车 0.5656×0.4332 m 的内切半径是
-        #       0.216608 m，用 0.4 会让窄处过度判死（通道需 > 0.8 m 才可过）。
         lethal_value: .inf
         #   ↑ 致命顶点自身的代价（由输入层传下来的 lethals）。
         inscribed_value: 1.0
@@ -207,12 +203,9 @@ move_base_flex:
         # 【实时障碍层】由传感器点云动态更新；静态地图没有的障碍靠它避开。
         type: 'mesh_layers/ObstacleLayer'
         combination_weight: 1.0
-        robot_height: 0.10
+        robot_height: 0.15
         #   ↑ 车体高度 [m]：高于它的点云被当作"可以从下面穿过"而忽略，
         #     低于它的才算障碍。**必须按真实车高设**。
-        #     ⚠ 当前 0.7 是教程车（含桅杆）的值；本车碰撞高度只有 0.215 m。
-        #       设 0.7 会把 0.246 m 高的隧道顶板全部当成障碍 → 隧道直接不可通行。
-        #       本车应设 ≈ 0.23（pb_vehicle_profile.yaml 的值）。
         max_obstacle_dist: 3.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
         topic: 'obstacle_points'
@@ -224,8 +217,8 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['obstacle']
         combination_weight: 1.0
-        inflation_radius: 0.3      # 外圈，同 static_inflation
-        inscribed_radius: 0.1      # 内圈，同 static_inflation（车体尺寸）
+        inflation_radius: 0.30     # 外圈，同 static_inflation，米。
+        inscribed_radius: 0.10 # 内圈，同 static_inflation，米。
         lethal_value: .inf
         inscribed_value: 1.0
         repulsive_field: false

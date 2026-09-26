@@ -1,67 +1,48 @@
+# PB 车辆仿真配置。导航、定位和地图参数位于 mesh_navigation_tutorials/config/mbf_mesh_nav.yaml。
+# pb_vehicle 是配置容器名，不是 ROS 节点名；不要把整个文件直接当节点参数加载。
 pb_vehicle:
   ros__parameters:
-    # Low-clearance test vehicle (doc/PB_LOW_CLEARANCE_VEHICLE_PLAN.md): the
-    # gimbal, armor and projectile container are gone, so the body is a 0.36 x
-    # 0.24 x 0.13 m box on the original wheels with the sensors mounted low.
-    #
-    # The two disc-based planners (MeshNav's `inscribed_radius`, which is set
-    # lethal around every lethal vertex, and JIE's `robot_radius_xy` cylinder) see
-    # the 0.5656 x 0.4332 m footprint as a circle, so the radius here is the
-    # footprint's inscribed radius = half width, i.e.
-    # `pb_vehicle_adapter.robot_envelope.footprint_radii()["inscribed"]`
-    # = 0.216608 m (the circumscribed radius is 0.356223 m).
-    #
-    # Why the inscribed radius: a straight corridor of width w leaves a band of
-    # w - 2 r for the path, so with r = half width the disc model refuses exactly
-    # the corridors that the rectangular body cannot pass.  A smaller r would let
-    # the planner plan through gaps the body cannot fit, a larger one rejects the
-    # 0.85 m RMUC2026 tunnels that the vehicle physically drives through with
-    # 0.19 - 0.21 m per side (doc section 9.5).  Turning in place stays
-    # optimistic, because no disc restores the body's corners; that is a model
-    # limitation, not an argument for a bigger disc.
-    static_inscribed_radius: 0.216608
-    obstacle_inscribed_radius: 0.216608
-    static_inflation_radius: 0.70
-    obstacle_inflation_radius: 0.70
-    robot_height: 0.23
-    base_to_chassis_xyz: [0.0, 0.0, 0.076]
-    base_to_chassis_xyzw: [0.0, 0.0, 0.0, 1.0]
-    # Collision bounding box in base_footprint (metres), union of every URDF
-    # collision primitive after applying joint and collision rotations.
-    # Regenerate with:
-    #   python3 -m pb_vehicle_adapter.robot_envelope
-    # test/test_robot_envelope.py fails if these values drift from the model.
-    # Single source of truth for the DDDMR cuboid (config/dddmr_rmuc2026.yaml);
-    # do not maintain a second set of dimensions.
-    collision_aabb_min: [-0.2828, -0.216607, 0.000198]
-    collision_aabb_max: [0.2828, 0.216607, 0.226]
+    # --- 仿真世界 ------------------------------------------------------------
+    world_name: "rmuc2026_field"  # Gazebo 世界文件名（不含 .sdf）。
 
-    # 新增参数（将原来launch文件里面传来传去的参数直接写到一个yaml文件里面）
-    world_name: "rmuc2026_field"
-    map_name: "rmuc2026_field"
-    
-    obstacle_segmentation: "rmcl_seg" # choices=["none", "ground_truth", "rmcl_seg"]
+    # --- 仿真启动与显示 ------------------------------------------------------
+    start_sim: "True"                 # 是否一并启动仿真；False 复用已运行的仿真。
+    start_gazebo_gui: "True"          # 是否显示 Gazebo 图形界面。
 
-    # 仿真机器人初始位置
-    spawn_x: "-11.9"
-    spawn_y: "-4.4"
-    spawn_z: "0.25"
-    spawn_yaw_deg: "0"
-    contact_diagnostics: "False"
-    drive_model: "legacy"  # choices=["legacy", "pi"]
-    spawn_rendering_sensors: "True"
-    rviz_config: "pb_navigation.rviz"
+    # --- PB 资源位置 ---------------------------------------------------------
+    # 机器人模型资源目录。
+    pb_robot_description_root: "/home/rainple/nav_test/third_party/pb2025_sources/pb2025_robot_description"
+    # Gazebo 公共模型目录。
+    pb_resources_root: "/home/rainple/nav_test/third_party/pb2025_sources/rmoss_gz_resources"
+    # Gazebo 底盘与灯条插件目录。
+    pb_plugin_path: "/home/rainple/nav_test/third_party/pb2025_install/rmoss_gz_plugins/plugins"
 
-    # .h5缓存文件路径
-    mesh_map_working_path: "/home/rainple/nav_test/mesh_navigation_tutorials/rmuc2026_field.h5"
-    startup_timeout_s: "120"
+    # --- 车辆生成与传感器 ----------------------------------------------------
+    spawn_x: "-11.9"                  # 机器人初始 X 坐标，米。
+    spawn_y: "-4.4"                   # 机器人初始 Y 坐标，米。
+    spawn_z: "0.25"                   # 机器人初始 Z 坐标，米。
+    spawn_yaw_deg: "0"                # 初始朝向，角度；launch 转为弧度交给 Gazebo。
+    spawn_rendering_sensors: "True"   # 是否生成 GPU 雷达和相机。
+    contact_diagnostics: "False"      # 是否打开模型接触诊断。
+    drive_model: "pi"                 # 底盘驱动实现：legacy 或 pi。
 
-    mesh_controller_holonomic: 
+    # --- ROS 节点与底盘适配 --------------------------------------------------
+    use_sim_time: true                 # 节点是否使用仿真 /clock。
+    robot_state_publish_frequency: 100.0  # robot_state_publisher 的 TF 发布频率，Hz。
+    bridge_config_file: "pb_ros_gz_bridge.yaml"  # ROS/Gazebo 话题桥接规则文件，位于本包 config/。
+    truth_topic: "/pb_sim/chassis_truth"  # 同一仿真步的底盘真值里程计输入。
+    health_topic: "/pb/truth_health" # 真值适配器健康状态输出。
+    control_source: "meshnav"         # 底盘速度来源；复用仿真时也切换到此值。
+    hold_enabled: true                # 导航指令停止时是否启用底盘闭环驻停。
+    hold_pose_topic: "/odom"         # 驻停控制读取的位姿话题。
+    hold_gain: 1.0                    # 驻停位置误差的比例增益。
+    hold_max_linear_velocity: 0.1     # 驻停最大线速度，米/秒。
+    hold_max_angular_velocity: 0.2    # 驻停最大角速度，弧度/秒。
+    hold_angular_deadband: 0.02       # 驻停角度误差死区，弧度。
+    base_to_chassis_xyz: [0.0, 0.0, 0.076]   # base_footprint 到 chassis 的平移，米。
+    base_to_chassis_xyzw: [0.0, 0.0, 0.0, 1.0]  # 同一变换的四元数 [x,y,z,w]。
 
-    start_rviz: "True"
-    start_gazebo_gui: "True"
-    # start_sim:=false reuses a running simulation: switch the existing velocity
-    # selector to this framework instead of starting a second one.
-    start_sim: "True"
-
-    control_source: "meshnav" # choices=["meshnav", "jie", "dddmr"]
+    # --- 车体几何 ------------------------------------------------------------
+    collision_aabb_min: [-0.2828, -0.216607, 0.000198]  # base_footprint 中碰撞包围盒最小角，米。
+    collision_aabb_max: [0.2828, 0.216607, 0.226]       # 同一包围盒最大角，米。
+    # 包围盒来自 pb_vehicle_adapter.robot_envelope；模型修改后需重新生成。

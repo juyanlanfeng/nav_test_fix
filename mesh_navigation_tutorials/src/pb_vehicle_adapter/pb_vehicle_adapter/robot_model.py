@@ -3,10 +3,9 @@
 Gazebo Fortress renders `gpu_lidar` and `camera` sensors even in server-only
 mode, so on a machine without a GPU (software EGL) those three sensors drop the
 simulation's real-time factor from ~1.0 to ~0.06 and make any closed-loop run
-unusable.  None of the three navigation frameworks use them: MeshNav, JIE and
-DDDMR navigate from their own static maps and only need the ground-truth TF and
-/odom.  `pb_vehicle_sim.launch.py` therefore spawns this reduced model when
-`spawn_rendering_sensors:=False`, so the model keeps one source of truth.
+unusable. MeshNav can navigate from its static map and only needs the
+ground-truth TF and /odom. `meshnav_pb_sim.launch.py` spawns this reduced model
+when `spawn_rendering_sensors` is False in the YAML profile.
 """
 
 import xml.etree.ElementTree as ET

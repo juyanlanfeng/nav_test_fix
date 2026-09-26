@@ -30,54 +30,51 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
-
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
-
 from launch_ros.actions import Node
+import yaml
+
+
+def _create_actions(context):
+    mesh_share = get_package_share_directory("mesh_navigation_tutorials")
+    config_file = os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml")
+    with open(config_file, encoding="utf-8") as stream:
+        params = yaml.safe_load(stream)["move_base_flex"]["ros__parameters"]
+    parameter_files = [config_file]
+    if "pb_terminal_controller" in params["controllers"]:
+        pb_share = get_package_share_directory("pb_vehicle_adapter")
+        parameter_files.append(os.path.join(pb_share, "config", "pb_terminal_controller.yaml"))
+
+    # 通用教程可为所选地图覆盖 YAML 中的 PB 默认路径。
+    overrides = {}
+    map_file = LaunchConfiguration("mesh_map_path").perform(context)
+    working_file = LaunchConfiguration("mesh_map_working_path").perform(context)
+    if map_file:
+        overrides["mesh_map.mesh_file"] = map_file
+    if working_file:
+        overrides["mesh_map.mesh_working_file"] = working_file
+
+    meshnav = Node(
+        package="mbf_mesh_nav",
+        executable="mbf_mesh_nav",
+        name="move_base_flex",
+        remappings=[("/move_base_flex/cmd_vel", "/cmd_vel")],
+        parameters=parameter_files + ([overrides] if overrides else []),
+    )
+    return [meshnav]
 
 
 def generate_launch_description():
-    launch_args = [
+    return LaunchDescription([
         DeclareLaunchArgument(
-            "mesh_map_path",
-            description="Path to the mesh file that defines the map."
-            "Allowed formats are our internal HDF5 format and all"
-            "standard mesh formats loadable by Assimp.",
+            "mesh_map_path", default_value="",
+            description="Mesh map path; empty uses mbf_mesh_nav.yaml",
         ),
         DeclareLaunchArgument(
-            "mesh_map_working_path",
-            description="Path to the mesh file used by the mesh navigation "
-            "to store costs during operation. Only HDF5 formats are permitted.",
+            "mesh_map_working_path", default_value="",
+            description="HDF5 working path; empty uses mbf_mesh_nav.yaml",
         ),
-    ]
-    mesh_map_path = LaunchConfiguration("mesh_map_path")
-    mesh_map_working_path = LaunchConfiguration("mesh_map_working_path")
-
-    mbf_mesh_nav_config = os.path.join(
-        get_package_share_directory("mesh_navigation_tutorials"), "config", "mbf_mesh_nav.yaml"
-    )
-
-    mesh_nav_server = Node(
-        name="move_base_flex",
-        package="mbf_mesh_nav",
-        executable="mbf_mesh_nav",
-        remappings=[
-            ("/move_base_flex/cmd_vel", "/cmd_vel"),
-        ],
-        parameters=[
-            mbf_mesh_nav_config,
-            {
-                "mesh_map.mesh_file": mesh_map_path,
-                "mesh_map.mesh_working_file": mesh_map_working_path
-            }
-        ]
-    )
-
-    return LaunchDescription(
-        launch_args
-        + [
-            mesh_nav_server,
-        ]
-    )
+        OpaqueFunction(function=_create_actions),
+    ])

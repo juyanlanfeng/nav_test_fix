@@ -21,6 +21,8 @@ SHARE = get_package_share_directory("pb_vehicle_adapter")
 SDF_PATH = os.path.join(SHARE, "models", "pb_navigation_robot.sdf")
 URDF_PATH = os.path.join(SHARE, "urdf", "pb_navigation_robot.urdf")
 PROFILE_PATH = os.path.join(SHARE, "config", "pb_vehicle_profile.yaml")
+MESH_SHARE = get_package_share_directory("mesh_navigation_tutorials")
+NAV_CONFIG_PATH = os.path.join(MESH_SHARE, "config", "mbf_mesh_nav.yaml")
 DDDMR_CONFIG_PATH = os.path.join(SHARE, "config", "dddmr_rmuc2026.yaml")
 
 REMOVED_STRUCTURE = ("gimbal", "armor", "projectile", "light", "speed_monitor", "barrel")
@@ -42,6 +44,11 @@ TOPICS = {
 def _profile():
     with open(PROFILE_PATH, encoding="utf-8") as stream:
         return yaml.safe_load(stream)["pb_vehicle"]["ros__parameters"]
+
+
+def _mesh_map():
+    with open(NAV_CONFIG_PATH, encoding="utf-8") as stream:
+        return yaml.safe_load(stream)["move_base_flex"]["ros__parameters"]["mesh_map"]
 
 
 def _sdf_model():
@@ -104,24 +111,24 @@ def test_no_dangling_references():
 
 
 def test_envelope_matches_the_shared_profile():
-    """robot_height and collision_aabb_* must come from the generated model."""
+    """The vehicle envelope and navigation obstacle height match the model."""
     report = envelope(URDF_PATH)
     profile = _profile()
+    mesh_map = _mesh_map()
     for actual, expected in zip(report["min"], profile["collision_aabb_min"]):
         assert abs(actual - expected) < 1.0e-3, (actual, expected)
     for actual, expected in zip(report["max"], profile["collision_aabb_max"]):
         assert abs(actual - expected) < 1.0e-3, (actual, expected)
-    assert report["max"][2] <= profile["robot_height"] + 1.0e-9
+    assert report["max"][2] <= mesh_map["obstacle"]["robot_height"] + 1.0e-9
     # The low vehicle must actually be low: the tunnel clear height is ~0.247 m.
     assert report["max"][2] < 0.24
 
 
 def test_footprint_radius_matches_the_disc_model():
-    """The disc planners must be configured from the measured footprint.
+    """MeshNav's disc radius must match the measured footprint.
 
     MeshNav makes a disc of `inscribed_radius` lethal around every lethal vertex
-    and JIE blocks the same disc through `robot_radius_xy`, so the value decides
-    which gaps the planners accept.  It has to be the footprint's inscribed
+    so the value decides which gaps the planner accepts. It has to be the footprint's inscribed
     radius (half width): a smaller disc accepts gaps the body cannot pass, a
     bigger one rejects the RMUC2026 tunnels (0.85 m) that the vehicle does drive
     through.
@@ -130,21 +137,23 @@ def test_footprint_radius_matches_the_disc_model():
 
     report = envelope(URDF_PATH)
     radii = footprint_radii(report)
-    profile = _profile()
-    for key in ("static_inscribed_radius", "obstacle_inscribed_radius"):
-        assert abs(profile[key] - radii["inscribed"]) < 5.0e-4, (key, profile[key], radii)
+    mesh_map = _mesh_map()
+    static = mesh_map["static_inflation"]
+    obstacle = mesh_map["obstacle_inflation"]
+    for layer in (static, obstacle):
+        assert abs(layer["inscribed_radius"] - radii["inscribed"]) < 5.0e-4
 
     # Soundness bound: the free band of a straight corridor of width w is
-    # w - 2 r, so a disc radius below the half width would let both planners
+    # w - 2 r, so a disc radius below the half width would let the planner
     # through corridors narrower than the body itself.
     half_width = max(-report["min"][1], report["max"][1])
-    assert profile["static_inscribed_radius"] >= half_width - 1.0e-6
+    assert static["inscribed_radius"] >= half_width - 1.0e-6
     # The tunnels are on the other side of the bound: 0.85 m of clear width minus
     # the two lethal bands has to stay wide enough to contain a path.
-    assert 0.85 - 2.0 * profile["static_inscribed_radius"] > 0.30
+    assert 0.85 - 2.0 * static["inscribed_radius"] > 0.30
     # Outer ring: costs still grow towards obstacles, i.e. planning prefers the
     # corridor centre.
-    assert profile["static_inflation_radius"] > profile["static_inscribed_radius"]
+    assert static["inflation_radius"] > static["inscribed_radius"]
 
 
 def test_dddmr_cuboids_match_the_envelope():

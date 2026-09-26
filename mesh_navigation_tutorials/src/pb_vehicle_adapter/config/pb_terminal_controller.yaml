@@ -1,10 +1,7 @@
 # PB simulation terminal-control parameters (pb_terminal_controller).
 #
-# These are PB-entry-specific: they live here, not in the shared
-# mesh_navigation_tutorials/config/mbf_mesh_nav.yaml, so the public MeshNav
-# configuration carries no PB simulation dependency.  pb_meshnav.launch.py
-# loads this file only when controller_plugin:=pb_terminal_controller is
-# selected; the launch owns the selection, this file owns type and parameters.
+# MBF 的 controllers 参数在 mbf_mesh_nav.yaml 中选择此插件；
+# 此文件存放插件自身的详细参数，由 MBF 启动文件自动加载。
 #
 # Values were migrated verbatim from the previous in-tree configuration; the
 # before/after ros2 param dumps are compared in

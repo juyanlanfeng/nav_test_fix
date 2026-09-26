@@ -24,42 +24,18 @@ colcon build --packages-select pb_vehicle_adapter --symlink-install
 source install/setup.bash
 ```
 
-Start the basic vehicle simulation first:
+Start the PB simulation and MeshNav together:
 
 ```bash
-ros2 launch pb_vehicle_adapter pb_vehicle_sim.launch.py \
-  world_name:=rmuc2026_field start_gazebo_gui:=False
+ros2 launch pb_vehicle_adapter meshnav_pb_sim.launch.py
 ```
 
-Use one navigation stack at a time:
+Edit `config/pb_vehicle_profile.yaml` for the world, spawn pose, Gazebo GUI and
+vehicle sensors. Edit `mesh_navigation_tutorials/config/mbf_mesh_nav.yaml` for
+navigation, localization and map settings. Set `start_sim` to `False` when reusing an
+already running PB simulation.
 
-```bash
-ros2 launch pb_vehicle_adapter pb_meshnav.launch.py
-ros2 launch pb_vehicle_adapter pb_jie.launch.py
-ros2 launch pb_vehicle_adapter pb_dddmr.launch.py   # source setup_dddmr_env.sh first
-```
-
-`pb_meshnav.launch.py` creates a PB-specific MeshNav cache and disables the
-Ceres slope-corridor profile.  `pb_jie.launch.py` uses the existing converted
-RMUC2026 PCD, the JIE planner/controller, and sends its stamped command only
-to the adapter's JIE input.  `pb_dddmr.launch.py` starts the DDDMR map publisher
-plus `global_planner_node` and `p2p_move_base_node` (Omni trajectory generator,
-`/dddmr/mapcloud` and `/dddmr/mapground`, output on `/pb/dddmr_cmd_vel_stamped`).
-
-All three navigation entries share the same contract: `start_sim` (true starts
-the shared simulation, false reuses a running one and switches the velocity
-selector), `start_rviz` (each entry opens its own framework-specific RViz),
-`world_name`, `map_bundle`, `vehicle_profile`, `startup_timeout_s` (readiness
-gate: the entry runs `pb_preflight --wait-timeout <value>` after spawning, and
-prints the failing items instead of navigating blindly; `0` checks once) and
-`spawn_rendering_sensors` (see below).  Only one framework may drive the vehicle
-at a time.
-
-`pb_jie.launch.py` also takes `start_click_selector` (default `True`): pass
-`False` for scripted runs, which publish `/start_point` and `/goal_point`
-directly, and to save one DDS participant on hosts with a low participant limit.
-
-`spawn_rendering_sensors:=False` spawns the same robot without the two
+Setting `spawn_rendering_sensors: "False"` in the YAML spawns the same robot without the two
 `gpu_lidar`s and the camera, and is a **fallback for environments that cannot
 render**: when the process has no GPU render node (`/dev/dri`), no `/dev/nvidia*`
 and no X socket, Fortress renders those sensors in software and the simulation
@@ -75,9 +51,8 @@ ACCEPT_SENSORS=False bash log/probe_rtf2.sh  # sensors off (reduced model)
 watch -n1 nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv
 ```
 
-None of the frameworks need those sensors for navigation (they navigate from
-their own static maps), so the reduced model is also useful for pure
-navigation runs.  It is produced on the fly by `tools/reduced_robot_model.py`,
+MeshNav can use its static map without those rendering sensors, so the
+reduced model is also useful for pure navigation runs.  It is produced on the fly by `tools/reduced_robot_model.py`,
 so `models/pb_navigation_robot.sdf` stays the single source of truth.
 
 Read-only readiness check (exits non-zero with per-item failures; `--wait-timeout`
@@ -199,7 +174,7 @@ These changes close the four items raised by the closed-loop review:
 - **Command timestamps**: `pb_cmd_vel_adapter` rejects unstamped commands and
   commands whose stamp is more than `max_stamp_age_s` (default 0.5 s) away from
   the current time.
-- **Profile loading**: `launch/pb_vehicle_sim.launch.py` reads
+- **Profile loading**: `launch/meshnav_pb_sim.launch.py` reads
   `config/pb_vehicle_profile.yaml` and passes `base_to_chassis_xyz` /
   `base_to_chassis_xyzw` explicitly to `pb_ground_truth_adapter`. The profile's
   top-level key (`pb_vehicle`) is a container, not a node name, so it cannot be
@@ -267,10 +242,10 @@ The low-clearance vehicle (doc/PB_LOW_CLEARANCE_VEHICLE_PLAN.md) has to plan and
 drive the two 0.85 m RMUC tunnels. What the tunnel cost that work, and what to
 keep in mind when touching it:
 
-- **The footprint is a disc in both planners.** MeshNav's
+- **The footprint is approximated as a disc.** MeshNav's
   `static_inflation.inscribed_radius` is a lethal disc around every lethal
-  vertex, JIE's `robot_radius_xy` is a cylinder. Both are set from
-  `pb_vehicle_profile.yaml`, so the value is derived from the envelope
+  vertex. Its radius is set in
+  `mbf_mesh_nav.yaml` from the vehicle envelope
   (`pb_vehicle_adapter.robot_envelope.footprint_radii()`): the *inscribed*
   radius = half width = 0.216608 m. For a straight corridor the free band is
   `w - 2 r`, so this radius refuses exactly the corridors the rectangular body
