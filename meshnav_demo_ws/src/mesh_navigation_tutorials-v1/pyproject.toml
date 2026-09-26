@@ -1,8 +1,0 @@
-[tool.ruff]
-line-length = 99
-
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "W", "F"]
-ignore = []

@@ -29,8 +29,14 @@ def generate_launch_description():
     profile = _profile()
     world_name = LaunchConfiguration("world_name")
     map_name = LaunchConfiguration("map_name")
+
+    start_rviz = LaunchConfiguration("start_rviz")
+    obstacle_segmentation = LaunchConfiguration("obstacle_segmentation")
+
     adapter_launch = PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "launch", "pb_vehicle_sim.launch.py"])
     mesh_launch = PathJoinSubstitution([FindPackageShare("mesh_navigation_tutorials"), "launch", "mbf_mesh_navigation_server_launch.py"])
+
+    pkg_mesh_navigation_tutorials = get_package_share_directory("mesh_navigation_tutorials")
 
     arguments = [
         DeclareLaunchArgument("world_name", default_value="rmuc2026_field"),
@@ -39,6 +45,30 @@ def generate_launch_description():
             "start_sim", default_value="True", choices=["True", "False"],
             description="Start the shared simulation; False reuses a running one.",
         ),
+
+        # 动态避障默认打开，启动时不需要再带任何参数。
+        #
+        # 数据链（每一环都已在本工作区核对过）：
+        #   gz gpu_lidar <topic>/robot/cloud/points -> gz 实际发在
+        #   /robot/cloud/points/points -> bridge 映射成 /cloud
+        #   -> conv_pc2_to_o1dn_node 转成 O1DnStamped (/rmcl_inputs/cloud)
+        #   -> o1dn_map_segmentation_embree_node 拿 mesh 地图做 outlier 分割
+        #   -> 发布 sensor_msgs/PointCloud2 到 outlier_scan，remap 成 /obstacle_points
+        #   -> MeshNav 的 obstacle 层订阅 obstacle_points
+        #      （config/mbf_mesh_nav.yaml:216），再经 obstacle_inflation 进 final 层。
+        #
+        # 想关掉就带 obstacle_segmentation:=none。
+        # 注意：机器人没有渲染传感器时（spawn_rendering_sensors:=False）根本不存在
+        # /cloud，此时下面的 include 会被条件自动跳过，不会留下干等的空节点；
+        # 如果切到这种模式又忘记改参数，也不会报错。
+        DeclareLaunchArgument(
+            "obstacle_segmentation",
+            description="Method to segment LiDAR points for obstacles; "
+                        "rmcl_seg enables the live obstacle layer.",
+            default_value="rmcl_seg",
+            choices=["none", "ground_truth", "rmcl_seg"],
+        ),
+
         DeclareLaunchArgument("start_gazebo_gui", default_value="True", choices=["True", "False"]),
         DeclareLaunchArgument("start_rviz", default_value="True", choices=["True", "False"]),
         DeclareLaunchArgument(
@@ -94,6 +124,7 @@ def generate_launch_description():
     # context: without `scoped=True` the literal "False" leaked out and
     # overwrote this file's own start_rviz argument, so the RViz node below never
     # satisfied its IfCondition and never started.
+
     simulation = GroupAction(
         actions=[
             IncludeLaunchDescription(
@@ -117,6 +148,52 @@ def generate_launch_description():
     )
     # start_sim:=false reuses a running simulation: switch the existing velocity
     # selector to this framework instead of starting a second one.
+
+    # ---------------------------------------------------------------------------
+    # 这里**故意不再**启动 ekf_filter_node 和 ground_truth_localization_node。
+    #
+    # 1) ekf（robot_localization/ekf_node，config/ekf.yaml）配置成
+    #    world_frame: odom / base_link_frame: base_footprint，也就是说它会发布
+    #    odom -> base_footprint；而 PB 仿真链路里
+    #    pb_vehicle_adapter/pb_vehicle_adapter/ground_truth_adapter.py:255-264
+    #    已经在发同一条 odom -> base_footprint（外加 map -> odom 静态变换和 /odom）。
+    #    两个发布者同帧交替，RViz 的 Target Frame 又是 base_footprint
+    #    （rviz/pb_meshnav.rviz），于是整个视图在两个位姿之间跳，看起来就是“地图闪烁”。
+    #    实测交替的两套坐标约为 (-11.90, -4.40) 与 (0, 0)。
+    #
+    # 2) ground_truth_localization_node 订阅 /tf_gt
+    #    （mesh_navigation_tutorials_sim/src/ground_truth_localization.cpp:85），
+    #    但 PB 链路的 bridge（config/pb_ros_gz_bridge.yaml）根本没有映射 tf_gt，
+    #    所以它永远收不到数据；即使收到，它发的 map -> base_footprint 会和
+    #    ground_truth_adapter 的 map -> odom -> base_footprint 构成 TF 环。
+    #
+    # 也就是说 PB 仿真不需要“第二套定位链”，ground_truth_adapter 一条就够。
+    # 同理，下面 RMCL 的 localization 固定传 ground_truth：本入口里
+    # localization:=rmcl_micpl 会让 MICP-L 也去发 map -> base_footprint，
+    # 与上面那条链冲突，必须先把 ground_truth_adapter 关掉才谈得上用 RMCL 定位。
+    # ---------------------------------------------------------------------------
+
+    # RMCL：网格分割（以及可选的 MICP-L 定位）节点。
+    # 参数在这里显式接线 —— 之前只声明了 obstacle_segmentation 却没往 include 里传，
+    # 于是 rmcl_launch.py 用的是它自己的默认值 none，三个节点一个都没起来，
+    # /obstacle_points 的发布者数一直是 0，“动态避障”其实从未生效。
+    rmcl = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [pkg_mesh_navigation_tutorials, "launch", "rmcl_launch.py"]
+            )
+        ),
+        launch_arguments={
+            "localization": "ground_truth",
+            "obstacle_segmentation": obstacle_segmentation,
+        }.items(),
+        # 没有渲染传感器就没有 /cloud，分割节点只会空等，直接不启动。
+        condition=IfCondition(PythonExpression([
+            '"', obstacle_segmentation, '" != "none"',
+            ' and "', LaunchConfiguration("spawn_rendering_sensors"), '" == "True"',
+        ])),
+    )
+
     source_switch = ExecuteProcess(
         cmd=["ros2", "param", "set", "/pb_cmd_vel_adapter", "control_source", "meshnav"],
         output="screen",
@@ -154,4 +231,11 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("start_rviz")),
     )
     readiness = readiness_gate("meshnav", LaunchConfiguration("startup_timeout_s"))
-    return LaunchDescription(arguments + [simulation, source_switch, meshnav, rviz, readiness])
+    return LaunchDescription(arguments + 
+                             [simulation, 
+                              rmcl,
+                              source_switch, 
+                              meshnav, 
+                              rviz, 
+                              readiness]
+                            )

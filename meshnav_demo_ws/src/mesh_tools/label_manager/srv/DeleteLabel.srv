@@ -1,4 +1,0 @@
-string uuid
-string label
----
-mesh_msgs/MeshFaceCluster cluster

@@ -1,28 +1,33 @@
 {
-  "source_pcd": "/home/rainple/nav_test/field/pcd/Map_converted.pcd",
-  "source_sha256": "9fedb2864c8eb5d9218cc79c7e130a06c3928800f0ed589d14fd3d7299c2525b",
+  "source_pcd": "/home/rainple/nav_test/field/pcd/all_raw_points_converted.pcd",
+  "source_sha256": "206cf569c3d81dd671376a71ed65f3df11c9cd781035e5b4a52d3cba7a96b137",
   "encoding": "binary",
   "fields": [
     "x",
     "y",
-    "z"
+    "z",
+    "intensity",
+    "normal_x",
+    "normal_y",
+    "normal_z",
+    "curvature"
   ],
-  "points_declared": 302071,
-  "header_bytes": 177,
-  "trailing_padding_bytes": 3919,
-  "finite_points": 302071,
+  "points_declared": 11745401,
+  "header_bytes": 255,
+  "trailing_padding_bytes": 3841,
+  "finite_points": 11745401,
   "nonfinite_points_removed": 0,
   "valid_supplied_normals": 0,
   "bounds": {
     "min": [
-      -14.334568977355957,
-      -9.711959838867188,
-      -1.490530252456665
+      -12.87552261352539,
+      -10.433188438415527,
+      -1.121287226676941
     ],
     "max": [
-      18.701730728149414,
-      9.535688400268555,
-      3.178227186203003
+      20.096128463745117,
+      13.163020133972168,
+      3.8811850547790527
     ]
   }
 }

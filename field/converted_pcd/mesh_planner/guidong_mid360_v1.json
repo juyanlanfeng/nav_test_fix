@@ -1,0 +1,209 @@
+{
+  "generator": "field/pcd_to_nav_mesh.py",
+  "source_pcd": "/home/rainple/nav_test/field/pcd/all_raw_points_converted.pcd",
+  "source_pcd_sha256": "206cf569c3d81dd671376a71ed65f3df11c9cd781035e5b4a52d3cba7a96b137",
+  "encoding": "binary",
+  "fields": [
+    "x",
+    "y",
+    "z",
+    "intensity",
+    "normal_x",
+    "normal_y",
+    "normal_z",
+    "curvature"
+  ],
+  "points_declared": 11745401,
+  "header_bytes": 255,
+  "trailing_padding_bytes": 3841,
+  "source_points_finite": 11745401,
+  "nonfinite_points_removed": 0,
+  "scale": 1.0,
+  "translation_m": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "voxel_m": 0.01,
+  "downsampled_points": 5523478,
+  "normal_source": "estimated_local_pca",
+  "valid_supplied_normal_fraction": 0.0,
+  "normal_k": 24,
+  "grid_resolution_m": 0.1,
+  "grid_shape": [
+    238,
+    331
+  ],
+  "max_slope_deg": 40.0,
+  "layer_merge_m": 0.01,
+  "robot_height_m": 0.05,
+  "min_points_per_cell": 3,
+  "surface_orientation_policy": "unoriented_abs_normal_z",
+  "headroom_policy": "next_point_surface_layer",
+  "layer_matching_policy": "reciprocal_nearest_height",
+  "walkable_normal_points": 1913710,
+  "occupied_xy_cells": 23181,
+  "headroom_layers_rejected": 6700,
+  "cells_with_navigation_surface": 19239,
+  "cells_with_multiple_layers": 9294,
+  "maximum_layers_per_cell": 34,
+  "raw_vertices": 37488,
+  "raw_triangles": 43791,
+  "raw_components": 1361,
+  "raw_projected_area_m2": 218.9549999999952,
+  "largest_component_area_m2": 29.654999999997315,
+  "selected_projected_area_m2": 178.3049999999955,
+  "components_by_area": [
+    {
+      "projected_area_m2": 29.654999999997315,
+      "triangles": 5931
+    },
+    {
+      "projected_area_m2": 14.619999999999955,
+      "triangles": 2924
+    },
+    {
+      "projected_area_m2": 6.144999999999887,
+      "triangles": 1229
+    },
+    {
+      "projected_area_m2": 5.93499999999991,
+      "triangles": 1187
+    },
+    {
+      "projected_area_m2": 5.779999999999913,
+      "triangles": 1156
+    },
+    {
+      "projected_area_m2": 5.004999999999911,
+      "triangles": 1001
+    },
+    {
+      "projected_area_m2": 4.8799999999999315,
+      "triangles": 976
+    },
+    {
+      "projected_area_m2": 4.82999999999993,
+      "triangles": 966
+    },
+    {
+      "projected_area_m2": 4.759999999999922,
+      "triangles": 952
+    },
+    {
+      "projected_area_m2": 4.694999999999928,
+      "triangles": 939
+    },
+    {
+      "projected_area_m2": 4.664999999999923,
+      "triangles": 933
+    },
+    {
+      "projected_area_m2": 4.389999999999942,
+      "triangles": 878
+    },
+    {
+      "projected_area_m2": 4.314999999999926,
+      "triangles": 863
+    },
+    {
+      "projected_area_m2": 4.294999999999926,
+      "triangles": 859
+    },
+    {
+      "projected_area_m2": 4.214999999999945,
+      "triangles": 843
+    },
+    {
+      "projected_area_m2": 4.149999999999947,
+      "triangles": 830
+    },
+    {
+      "projected_area_m2": 4.0849999999999485,
+      "triangles": 817
+    },
+    {
+      "projected_area_m2": 3.8399999999999537,
+      "triangles": 768
+    },
+    {
+      "projected_area_m2": 3.5649999999999418,
+      "triangles": 713
+    },
+    {
+      "projected_area_m2": 3.3999999999999666,
+      "triangles": 680
+    }
+  ],
+  "selected_components": [
+    57,
+    61,
+    104,
+    109,
+    113,
+    127,
+    144,
+    149,
+    169,
+    177,
+    181,
+    188,
+    207,
+    213,
+    218,
+    220,
+    224,
+    242,
+    252,
+    277,
+    288,
+    296,
+    328,
+    354,
+    365,
+    391,
+    443,
+    464,
+    508,
+    550,
+    601,
+    633,
+    695,
+    775,
+    880,
+    1077,
+    1167,
+    1222,
+    1233,
+    1283,
+    1294
+  ],
+  "min_component_area_m2": 1.0,
+  "output_ply": "/home/rainple/nav_test/field/converted_pcd/mesh_planner/guidong_mid360_v1.ply",
+  "output_ply_sha256": "b585b88291a314d18f2651963bd3bbbeef5c4f015aedd706e03415dcc7a62fba",
+  "output_vertices": 21439,
+  "output_triangles": 35661,
+  "output_bounds_m": [
+    [
+      -6.300000000000024,
+      -8.000000000000009,
+      -0.3228917121887207
+    ],
+    [
+      15.399999999999897,
+      12.09999999999992,
+      3.771649122238159
+    ]
+  ],
+  "output_role": "candidate_walkable_surface_only",
+  "meshnav_getpath_tested": false,
+  "boundary_edges": 7309,
+  "nonmanifold_edges": 0,
+  "xy_locations_with_multiple_layers": 6378,
+  "maximum_face_slope_deg": 39.898627867110214,
+  "limitations": [
+    "PCD has no free-space rays; missing points are unknown, not free space.",
+    "Unoriented normals cannot by themselves distinguish a floor top from a ceiling underside.",
+    "Closed-loop validation is required before deployment."
+  ]
+}

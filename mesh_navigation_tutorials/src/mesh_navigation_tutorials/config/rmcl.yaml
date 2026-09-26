@@ -64,5 +64,5 @@ rmcl_micpl:
 rmcl_seg:
   ros__parameters:
     map_frame: map
-    min_dist_outlier_scan: 0.15
-    min_dist_outlier_map: 0.15
+    min_dist_outlier_scan: 0.3
+    min_dist_outlier_map: 0.3

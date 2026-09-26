@@ -1,4 +1,0 @@
-build:
-  cmake-args:
-    - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-    - -DFETCHCONTENT_SOURCE_DIR_EMBREE_BIN=/home/rainple/opt/embree-4.4.0

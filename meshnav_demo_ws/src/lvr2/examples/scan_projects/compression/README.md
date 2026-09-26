@@ -1,3 +1,0 @@
-# ScanProject Compression example
-
-TODO

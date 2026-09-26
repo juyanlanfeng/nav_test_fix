@@ -273,6 +273,7 @@ target_include_directories(lvr2 PUBLIC
 )
 target_link_libraries(lvr2
     PUBLIC
+    embree
     Eigen3::Eigen
     ${LVR2_INTERNAL_DEPENDENCIES_SHARED} 
     ${LVR2_LIB_DEPENDENCIES}

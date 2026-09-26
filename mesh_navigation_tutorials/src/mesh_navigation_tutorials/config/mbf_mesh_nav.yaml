@@ -73,6 +73,8 @@ move_base_flex:
     planner_max_retries: 2       # 规划失败重试次数。
     project_path_onto_mesh: false  # 是否把路径投影回网格。false：直接用规划器输出。
 
+    planner_frequency: 1.0       # 【动态避障开关】执行期间周期性重规划 [Hz]；0 = 关闭（这就是默认值）
+
     # ---- 局部控制器（把"往哪走"变成速度指令）--------------------------------
     controllers: ['mesh_controller']
     # controllers: ['pb_terminal_controller']
@@ -211,7 +213,7 @@ move_base_flex:
         #     ⚠ 当前 0.7 是教程车（含桅杆）的值；本车碰撞高度只有 0.215 m。
         #       设 0.7 会把 0.246 m 高的隧道顶板全部当成障碍 → 隧道直接不可通行。
         #       本车应设 ≈ 0.23（pb_vehicle_profile.yaml 的值）。
-        max_obstacle_dist: 10.0
+        max_obstacle_dist: 3.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
         topic: 'obstacle_points'
         #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。
@@ -222,7 +224,7 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['obstacle']
         combination_weight: 1.0
-        inflation_radius: 1.5      # 外圈，同 static_inflation
+        inflation_radius: 0.5      # 外圈，同 static_inflation
         inscribed_radius: 0.2      # 内圈，同 static_inflation（车体尺寸）
         lethal_value: .inf
         inscribed_value: 1.0
