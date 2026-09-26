@@ -35,3 +35,33 @@ pb_vehicle:
     # do not maintain a second set of dimensions.
     collision_aabb_min: [-0.2828, -0.216607, 0.000198]
     collision_aabb_max: [0.2828, 0.216607, 0.226]
+
+    # 新增参数（将原来launch文件里面传来传去的参数直接写到一个yaml文件里面）
+    world_name: "rmuc2026_field"
+    map_name: "rmuc2026_field"
+    
+    obstacle_segmentation: "rmcl_seg" # choices=["none", "ground_truth", "rmcl_seg"]
+
+    # 仿真机器人初始位置
+    spawn_x: "-11.9"
+    spawn_y: "-4.4"
+    spawn_z: "0.25"
+    spawn_yaw_deg: "0"
+    contact_diagnostics: "False"
+    drive_model: "legacy"  # choices=["legacy", "pi"]
+    spawn_rendering_sensors: "True"
+    rviz_config: "pb_navigation.rviz"
+
+    # .h5缓存文件路径
+    mesh_map_working_path: "/home/rainple/nav_test/mesh_navigation_tutorials/rmuc2026_field.h5"
+    startup_timeout_s: "120"
+
+    mesh_controller_holonomic: 
+
+    start_rviz: "True"
+    start_gazebo_gui: "True"
+    # start_sim:=false reuses a running simulation: switch the existing velocity
+    # selector to this framework instead of starting a second one.
+    start_sim: "True"
+
+    control_source: "meshnav" # choices=["meshnav", "jie", "dddmr"]

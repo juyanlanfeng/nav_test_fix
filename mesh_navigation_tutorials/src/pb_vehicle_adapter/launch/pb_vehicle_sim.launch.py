@@ -36,38 +36,25 @@ def generate_launch_description():
     profile = _profile()
     sim_share = get_package_share_directory("mesh_navigation_tutorials_sim")
     adapter_share = get_package_share_directory("pb_vehicle_adapter")
-    world_name = LaunchConfiguration("world_name")
-    gui = LaunchConfiguration("start_gazebo_gui")
+    world_name = str(profile["world_name"])
+    start_gazebo_gui = str(profile["start_gazebo_gui"])
+    contact_diagnostics = str(profile["contact_diagnostics"])
+    drive_model = str(profile["drive_model"])
+    start_rviz = str(profile["start_rviz"])
+    rviz_config = str(profile["rviz_config"])
+    control_source = str(profile["control_source"])
+    spawn_rendering_sensors  = str(profile["spawn_rendering_sensors"])
+    spawn_x = str(profile["spawn_x"])
+    spawn_y = str(profile["spawn_y"])
+    spawn_z = str(profile["spawn_z"])
+    spawn_yaw_deg = str(profile["spawn_yaw_deg"])
 
     declared_arguments = [
-        DeclareLaunchArgument("world_name", default_value="rmuc2026_field"),
-        DeclareLaunchArgument("contact_diagnostics", default_value="False", choices=["True", "False"]),
-        DeclareLaunchArgument("drive_model", default_value="legacy", choices=["legacy", "pi"]),
-        DeclareLaunchArgument("start_gazebo_gui", default_value="True", choices=["True", "False"]),
-        DeclareLaunchArgument("start_rviz", default_value="True", choices=["True", "False"]),
-        DeclareLaunchArgument(
-            "rviz_config", default_value="pb_navigation.rviz",
-            description="RViz config file in this package's rviz directory.",
-        ),
-        DeclareLaunchArgument("control_source", default_value="meshnav", choices=["meshnav", "jie", "dddmr"]),
-        DeclareLaunchArgument(
-            "spawn_rendering_sensors", default_value="True", choices=["True", "False"],
-            description=(
-                "False spawns the same robot without the gpu_lidar/camera sensors. "
-                "Needed on machines without a GPU: software rendering makes those "
-                "sensors drop the real-time factor to ~0.06, which no closed-loop "
-                "run can survive. The three frameworks navigate from static maps."
-            ),
-        ),
-        DeclareLaunchArgument("spawn_x", default_value="-11.9"),
-        DeclareLaunchArgument("spawn_y", default_value="-4.4"),
-        DeclareLaunchArgument("spawn_z", default_value="0.25"),
         # Spawn heading in degrees.  The tunnel acceptance starts the vehicle
         # facing the direction it will drive, like the manual drives do: a
         # heading-aligned controller would otherwise turn it around in place at
         # spawn, and the 4 - 7 cm base plate of the tunnel wall leaves no room for
         # that (doc section 9.5).
-        DeclareLaunchArgument("spawn_yaw_deg", default_value="0"),
         DeclareLaunchArgument(
             "pb_robot_description_root", default_value=PB_ROOT + "/pb2025_robot_description"
         ),
@@ -102,16 +89,16 @@ def generate_launch_description():
             PathJoinSubstitution([FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"])
         ),
         launch_arguments={
-            "gz_args": ["-r ", world_path, PythonExpression(['"" if ', gui, ' else " -s"'])]
+            "gz_args": ["-r ", world_path, PythonExpression(['"" if ', start_gazebo_gui, ' else " -s"'])]
         }.items(),
     )
     spawn_arguments = [
         "-name", "robot",
-        "-x", LaunchConfiguration("spawn_x"),
-        "-y", LaunchConfiguration("spawn_y"),
-        "-z", LaunchConfiguration("spawn_z"),
+        "-x", spawn_x,
+        "-y", spawn_y,
+        "-z", spawn_z,
         "-Y", PythonExpression(
-            ["str(float('", LaunchConfiguration("spawn_yaw_deg"),
+            ["str(float('", spawn_yaw_deg,
              "') * 3.141592653589793 / 180.0)"]),
     ]
     robot_model = PathJoinSubstitution(
@@ -120,14 +107,14 @@ def generate_launch_description():
     reduced_model = Command(
         [FindExecutable(name="python3"), " ",
          PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "tools", "reduced_robot_model.py"]),
-         " ", robot_model, " --diagnostics ", LaunchConfiguration("contact_diagnostics"),
-         " --drive ", LaunchConfiguration("drive_model")]
+         " ", robot_model, " --diagnostics ", contact_diagnostics,
+         " --drive ", drive_model]
     )
     full_model = Command(
         [FindExecutable(name="python3"), " ",
          PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "tools", "reduced_robot_model.py"]),
-         " ", robot_model, " --rendering True --diagnostics ", LaunchConfiguration("contact_diagnostics"),
-         " --drive ", LaunchConfiguration("drive_model")]
+         " ", robot_model, " --rendering True --diagnostics ", contact_diagnostics,
+         " --drive ", drive_model]
     )
     spawn = Node(
         package="ros_gz_sim",
@@ -136,7 +123,7 @@ def generate_launch_description():
         output="screen",
         arguments=["-string", full_model] + spawn_arguments,
         parameters=[{"use_sim_time": True}],
-        condition=IfCondition(LaunchConfiguration("spawn_rendering_sensors")),
+        condition=IfCondition(spawn_rendering_sensors),
     )
     spawn_without_sensors = Node(
         package="ros_gz_sim",
@@ -145,7 +132,7 @@ def generate_launch_description():
         output="screen",
         arguments=["-string", reduced_model] + spawn_arguments,
         parameters=[{"use_sim_time": True}],
-        condition=UnlessCondition(LaunchConfiguration("spawn_rendering_sensors")),
+        condition=UnlessCondition(spawn_rendering_sensors),
     )
     robot_description = Command(
         [FindExecutable(name="cat"), " ", PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "urdf", "pb_navigation_robot.urdf"])]
@@ -199,7 +186,7 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "use_sim_time": True,
-            "control_source": LaunchConfiguration("control_source"),
+            "control_source": control_source,
             "hold_enabled": True,
             "hold_pose_topic": "/odom",
             "hold_gain": 1.0,
@@ -212,9 +199,9 @@ def generate_launch_description():
         package="rviz2",
         executable="rviz2",
         output="screen",
-        arguments=["-d", PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "rviz", LaunchConfiguration("rviz_config")])],
+        arguments=["-d", PathJoinSubstitution([FindPackageShare("pb_vehicle_adapter"), "rviz", rviz_config])],
         parameters=[{"use_sim_time": True}],
-        condition=IfCondition(LaunchConfiguration("start_rviz")),
+        condition=IfCondition(start_rviz),
     )
 
     return LaunchDescription(
