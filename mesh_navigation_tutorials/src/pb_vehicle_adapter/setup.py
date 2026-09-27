@@ -33,6 +33,7 @@ setup(
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
+            "meshnav_navigator = pb_vehicle_adapter.meshnav_navigator:main",
             "pb_cmd_vel_adapter = pb_vehicle_adapter.cmd_vel_adapter:main",
             "pb_ground_truth_adapter = pb_vehicle_adapter.ground_truth_adapter:main",
             "pb_preflight = pb_vehicle_adapter.pb_preflight:main",

@@ -205,6 +205,18 @@ def generate_launch_description():
         parameters=[{"use_sim_time": nav_params["use_sim_time"]}],
         condition=IfCondition(str(nav_options["start_rviz"])),
     )
+    navigator = Node(
+        package="pb_vehicle_adapter",
+        executable="meshnav_navigator",
+        name="meshnav_navigator",
+        output="screen",
+        parameters=[os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml"), {
+            "use_sim_time": nav_params["use_sim_time"],
+            "planner_frequency": nav_params["planner_frequency"],
+            "planner": nav_params["planners"][0],
+            "controller": nav_params["controllers"][0],
+        }],
+    )
 
     # 启动 2 秒后运行就绪检查；检查不会阻塞上面的节点启动。
     startup_check = TimerAction(
@@ -224,6 +236,7 @@ def generate_launch_description():
         rmcl,
         source_switch,
         meshnav,
+        navigator,
         rviz,
         startup_check,
     ])

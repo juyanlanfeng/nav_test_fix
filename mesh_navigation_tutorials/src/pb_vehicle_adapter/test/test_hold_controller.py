@@ -242,6 +242,26 @@ def test_stale_pose_clears_hold_and_does_not_rearm_on_pose_alone():
         node.destroy_node()
 
 
+def test_old_path_abort_does_not_inhibit_already_executing_replacement():
+    from action_msgs.msg import GoalStatusArray, GoalStatus
+
+    node = _adapter(hold_enabled=True)
+    try:
+        old = GoalStatus(status=GoalStatus.STATUS_EXECUTING)
+        old.goal_info.goal_id.uuid[0] = 1
+        new = GoalStatus(status=GoalStatus.STATUS_EXECUTING)
+        new.goal_info.goal_id.uuid[0] = 2
+        node._action_status_callback(GoalStatusArray(status_list=[old, new]))
+        old.status = GoalStatus.STATUS_ABORTED
+        node._action_status_callback(GoalStatusArray(status_list=[old, new]))
+        assert not node._motion_inhibited
+        new.status = GoalStatus.STATUS_CANCELING
+        node._action_status_callback(GoalStatusArray(status_list=[old, new]))
+        assert node._motion_inhibited
+    finally:
+        node.destroy_node()
+
+
 def test_cancellation_inhibits_hold_until_a_new_goal():
     from action_msgs.msg import GoalStatusArray, GoalStatus
     node = _adapter(hold_enabled=True)

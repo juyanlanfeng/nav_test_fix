@@ -19,11 +19,6 @@ Panels:
     Expanded:
       - /Current View1
     Name: Views
-  - Class: rviz_mbf_plugins/MbfGoalActions
-    Name: MbfGoalActions
-    exe_path_action_server_path: /move_base_flex/exe_path
-    get_path_action_server_path: /move_base_flex/get_path
-    goal_input_topic: /rviz/goal_pose
   - Class: rviz_common/Time
     Experimental: false
     Name: Time

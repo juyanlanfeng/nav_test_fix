@@ -34,10 +34,11 @@
 # 【footprint 只通过膨胀层进入规划】MeshNav 没有"车体"这个概念，它把车近似成一个
 #   **无方向的圆盘**：
 #       inscribed_radius = 圆盘半径（贴到致命顶点就判死）
-#   对长方体 footprint，应取**内切半径 = 半宽**，不是外接半径。参考值
+#   内切半径只保护车体中部，不能保证转弯时车角无碰撞。静态窄通道需结合朝向评估。
+#   动态障碍层使用外接半径加余量，避免 MPPI 的点机器人模型擦到障碍。车体参考值
 #   （本车 0.5656 × 0.4332 m）：
 #       inscribed_radius = 0.216608   # 内切 = 半宽
-#       （外接半径为 0.356223，用它会把 0.4 m 宽的通道全判死）
+#       外接半径为 0.356223，动态障碍内圈取 0.40 m。
 # =============================================================================
 
 # 仅供启动文件读取的导航选项；meshnav_launch 不是 ROS 节点。
@@ -49,6 +50,15 @@ meshnav_launch:
     start_rviz: 'True'               # 是否打开导航 RViz。
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
     startup_timeout_s: '180'         # 导航就绪检查最长等待时间，秒；0 为单次检查。
+
+# PB 的目标协调节点：周期更新路径，新的 exe_path 在服务端平滑替换旧路径。
+meshnav_navigator:
+  ros__parameters:
+    goal_topic: '/rviz/goal_pose'       # RViz Mesh Goal 发布的目标位姿。
+    get_path_action: '/move_base_flex/get_path'  # 全局规划 action。
+    exe_path_action: '/move_base_flex/exe_path'  # MPPI 路径执行 action。
+    replan_stop_distance: 0.4          # 距目标小于此值时停止换路，交给控制器完成到点，米。
+    action_timeout: 15.0              # 规划请求或目标接收超时，秒（墙钟）；超时终止导航。
 
 move_base_flex:
   ros__parameters:
@@ -75,81 +85,81 @@ move_base_flex:
                                  # 必须**小于** static_inflation.inscribed_value，
                                  # 否则膨胀层内圈（已判为靠近障碍）也会被当作可通行，
                                  # 规划器会贴着障碍甚至穿过去。当前 0.99 < 1.0，安全。
-      publish_vector_field: true # 把整张向量场可视化出来。注意真正被控制器跟踪的
-                                 # 是这张场，不是报告出来的那条路径。
+      publish_vector_field: true # 发布全局向量场供可视化；当前 MPPI 跟踪输出路径。
 
     planner_patience: 10.0       # 单次全局规划的超时 [s]，超时后按 max_retries 重试。
-    planner_max_retries: 2       # 规划失败重试次数。
+    planner_max_retries: 10       # 规划失败重试次数。
     project_path_onto_mesh: false  # 是否把路径投影回网格。false：直接用规划器输出。
 
-    planner_frequency: 20.0       # 【动态避障开关】执行期间周期性重规划 [Hz]；0 = 关闭（这就是默认值）
+    planner_frequency: 2.0        # PB meshnav_navigator 行驶期间重新规划的频率 [Hz]；0 只规划一次。
+    controller_frequency: 20.0    # MPPI 控制频率 [Hz]，56 个预测步对应 2.8 秒。
 
     # ---- 局部控制器（把"往哪走"变成速度指令）--------------------------------
     controllers: ['mesh_controller']  # PB 仿真使用的 MBF 控制器；可改为 mesh_controller。
     mesh_controller:
-      # type: 'mesh_controller/MeshController'
-      # ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
-      #                            # 纯旋转卡死（本项目 -Y 曾因此失败）。
-      # lin_vel_factor: 1.0        # 线速度增益倍率。
-      # holonomic: true         # 改用 mesh_controller 时，是否按全向底盘控制。
-      # # max_angle 未设置时使用控制器默认值，单位为度。
+      type: 'mesh_controller/MeshController'
+      ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
+                                 # 纯旋转卡死（本项目 -Y 曾因此失败）。
+      lin_vel_factor: 1.0        # 线速度增益倍率。
+      holonomic: true         # 改用 mesh_controller 时，是否按全向底盘控制。
+      # max_angle 未设置时使用控制器默认值，单位为度。
 
       # type 参数用于指定 MeshNav 加载哪个插件作为控制器
-      type: 'mesh_mppi/DiffDriveMPC'
-      # 如果机器人当前位置对应的 MeshMap 代价值大于或等于该值，
-      # 控制器会认为机器人发生了碰撞
-      map_cost_limit: 1.0
-      # 进度检查相关参数
-      progress_check:
-        # 在进度检查的时间窗口内，机器人至少需要移动的距离，单位：米
-        translation_threshold: 0.25
-        # 机器人需要达到的代价降低比例，满足该条件时认为机器人仍在取得进展
-        # 注意：这里使用的代价并不是 MeshMap 中的地图代价！
-        # 这里使用的是代价函数针对优化后的控制信号序列所预测得到的代价
-        cost_reduction_threshold: 0.25
-        # 用于进度检查的时间窗口，单位：秒
-        # 如果在指定时间内，上述任何一个进度条件都没有满足，
-        # 则认为机器人陷入卡住（stuck）状态
-        timeframe: 5.0
-      # 运动学模型相关参数
-      kinematics:
-        # 速度限制
-        linear_velocity_max: 1.5       # 最大线速度
-        linear_velocity_min: -0.25     # 最小线速度，负值表示允许倒车
-        angular_velocity_max: 1.0      # 最大角速度
-        # 加速度限制
-        linear_acceleration_max: 10.0   # 最大线加速度
-        linear_acceleration_min: -3.0  # 最小线加速度 / 最大减速度
-        angular_acceleration_max: 9.0  # 最大角加速度
-      # MPPI 优化器相关参数
-      optimizer:
-        # 向未来预测机器人轨迹时使用的时间步数量
-        prediction_steps: 56
-        # 每次控制器迭代时采样并预测的轨迹数量
-        # 控制器运行频率由 move_base_flex 的 controller_frequency 参数决定
-        prediction_samples: 1000
-        # 用于采样控制信号的标准差
-        # 标准差参数的数量取决于所使用的运动学模型
-        stddev:
-          # 线速度采样标准差，单位：m/s
-          - 0.2
-          # 角速度采样标准差，单位：rad/s
-          - 0.4
-        # 控制器的温度参数
-        temperature: 2.0
-        # 控制器的控制代价参数
-        gamma: 0.015
-      # 代价函数相关参数
-      cost:
-        # 横向跟踪误差（Cross-Track Error, XTE）权重
-        # 用于惩罚机器人偏离参考路径的行为
-        xte_weight: 5.0
-        # 地图代价权重
-        # 用于惩罚机器人进入 MeshMap 分层代价地图中代价较高的区域
-        map_weight: 5.0
-        # 目标代价权重
-        # 用于鼓励控制器让机器人不断朝目标方向前进
-        goal_weight: 10.0
+      # type: 'mesh_mppi/DiffDriveMPC'
+      # # 如果机器人当前位置对应的 MeshMap 代价值大于或等于该值，
+      # # 控制器会认为机器人发生了碰撞
+      # map_cost_limit: 1.0
+      # # 进度检查相关参数
+      # progress_check:
+      #   # 在进度检查的时间窗口内，机器人至少需要移动的距离，单位：米
+      #   translation_threshold: 0.25
+      #   # 机器人需要达到的代价降低比例，满足该条件时认为机器人仍在取得进展
+      #   # 注意：这里使用的代价并不是 MeshMap 中的地图代价！
+      #   # 这里使用的是代价函数针对优化后的控制信号序列所预测得到的代价
+      #   cost_reduction_threshold: 0.25
+      #   # 用于进度检查的时间窗口，单位：秒
+      #   # 如果在指定时间内，上述任何一个进度条件都没有满足，
+      #   # 则认为机器人陷入卡住（stuck）状态
+      #   timeframe: 5.0
+      # # 运动学模型相关参数
+      # kinematics:
+      #   # 速度限制
+      #   linear_velocity_max: 0.8       # 最大线速度 [m/s]；为点云更新、重规划和底盘跟踪留出反应距离。
+      #   linear_velocity_min: -0.25     # 最小线速度，负值表示允许倒车
+      #   angular_velocity_max: 1.0      # 最大角速度
+      #   # 加速度限制
+      #   linear_acceleration_max: 10.0   # 最大线加速度
+      #   linear_acceleration_min: -3.0  # 最小线加速度 / 最大减速度
+      #   angular_acceleration_max: 9.0  # 最大角加速度
+      # # MPPI 优化器相关参数
+      # optimizer:
+      #   # 向未来预测机器人轨迹时使用的时间步数量
+      #   prediction_steps: 56
+      #   # 每次控制器迭代时采样并预测的轨迹数量
+      #   # 控制器运行频率由 move_base_flex 的 controller_frequency 参数决定
+      #   prediction_samples: 1000
+      #   # 用于采样控制信号的标准差
+      #   # 标准差参数的数量取决于所使用的运动学模型
+      #   stddev:
+      #     # 线速度采样标准差，单位：m/s
+      #     - 0.2
+      #     # 角速度采样标准差，单位：rad/s
+      #     - 0.4
+      #   # 控制器的温度参数
+      #   temperature: 2.0
+      #   # 控制器的控制代价参数
+      #   gamma: 0.015
+      # # 代价函数相关参数
+      # cost:
+      #   # 横向跟踪误差（Cross-Track Error, XTE）权重
+      #   # 用于惩罚机器人偏离参考路径的行为
+      #   xte_weight: 5.0
+      #   # 地图代价权重
+      #   # 用于惩罚机器人进入 MeshMap 分层代价地图中代价较高的区域
+      #   map_weight: 5.0
+      #   # 目标代价权重
+      #   # 用于鼓励控制器让机器人不断朝目标方向前进
+      #   goal_weight: 10.0
 
       # 两个type启用一个，前者是mesh_nav自带的全向控制器，后者是mesh_mppi插件，目前据说有动态避障能力，但是没有全向模型
 
@@ -261,11 +271,14 @@ move_base_flex:
       obstacle:
         # 【实时障碍层】由传感器点云动态更新；静态地图没有的障碍靠它避开。
         type: 'mesh_layers/ObstacleLayer'
-        combination_weight: 1.0
-        robot_height: 0.15
-        #   ↑ 车体高度 [m]：高于它的点云被当作"可以从下面穿过"而忽略，
-        #     低于它的才算障碍。**必须按真实车高设**。
-        max_obstacle_dist: 5.0
+        combination_weight: 0.5
+        robot_height: 0.10
+        #   ↑ 点到下方网格的最大投影距离 [m]；默认沿车体 Z 轴向下投影。
+        #     此插件虽命名为 robot_height，实际用于过滤点到网格的投影距离，
+        #     不会修改车辆几何或地图净空。当前取 0.50，以接收 0.5 m 方块在
+        #     不同视角下约 0.22～0.42 m 的回波；按真实车高 0.226 m 设置会漏检。
+        #     代价是低空悬物也可能被保守判为障碍，不能据此声称具有净空识别能力。
+        max_obstacle_dist: 3.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
         topic: 'obstacle_points'
         #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。
@@ -275,9 +288,9 @@ move_base_flex:
       obstacle_inflation:
         type: 'mesh_layers/InflationLayer' # 输入是 obstacle 层产生的动态障碍顶点。
         inputs: ['obstacle'] # 只对实时障碍层进行膨胀。
-        combination_weight: 1.0 # 本层参与后续组合时的权重
-        inflation_radius: 1.0 # 动态障碍最多影响到多远，单位 m。
-        inscribed_radius: 0.20 # 内圈半径 / 硬安全距离
+        combination_weight: 0.5 # 本层参与后续组合时的权重
+        inflation_radius: 0.5 # 动态障碍最多影响到多远，单位 m。
+        inscribed_radius: 0.20 # 动态障碍硬安全距离：车体外接半径约 0.356 m + 约 0.044 m 余量，覆盖转弯时车角。
         lethal_value: .inf # 障碍本体代价，设置为无穷大
         inscribed_value: 1.0 # 内圈代价
         repulsive_field: false # 是否生成斥力向量场

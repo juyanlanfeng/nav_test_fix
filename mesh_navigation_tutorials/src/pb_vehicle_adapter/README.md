@@ -35,6 +35,33 @@ vehicle sensors. Edit `mesh_navigation_tutorials/config/mbf_mesh_nav.yaml` for
 navigation, localization and map settings. Set `start_sim` to `False` when reusing an
 already running PB simulation.
 
+## Mesh MPPI 动态避障
+
+在上述启动入口中，RViz 的 **Mesh Goal** 发布到 `/rviz/goal_pose`，由
+`meshnav_navigator` 协调 `get_path → exe_path`。它按导航 YAML 中的
+`move_base_flex.planner_frequency`（默认 2 Hz）更新执行路径，距离目标 0.4 m
+以内停止换路，让 MPPI 完成到点。重新点击目标会先取消旧任务；重规划失败时
+取消执行并停车。导航 YAML 的 `meshnav_navigator` 段包含目标话题和超时参数。
+这些协调参数在启动时读取，修改 YAML 后重启导航。
+
+默认 RViz 配置已移除直接调用 action 的旧 `MbfGoalActions` 面板，避免两个
+客户端同时执行一个目标。不要再用旧测试脚本直接发送 `get_path → exe_path`
+来验证周期重规划：这种调用会绕过协调节点。
+
+```bash
+# 查看规划次数和任务状态（succeeded / failed / canceled 等）
+ros2 topic echo /meshnav_navigator/status --qos-durability transient_local
+
+# 取消当前目标，并清除等待执行的新目标
+ros2 service call /meshnav_navigator/cancel std_srvs/srv/Trigger '{}'
+```
+
+`mesh_map.obstacle.robot_height=0.50` 是点云向下投影的距离门限，
+不是修改后的车体高度；这是为了接收稀疏扫描中 0.5 m 方块的高处回波。
+车辆几何和建图净空仍保持原值。该取值会保守地阻挡某些低空悬物。
+动态膨胀内圈取 0.40 m（外接半径约 0.356 m 加余量），MPPI 最大线速度
+取 0.8 m/s。参数与原因均在导航 YAML 中注释。
+
 Setting `spawn_rendering_sensors: "False"` in the YAML spawns the same robot without the two
 `gpu_lidar`s and the camera, and is a **fallback for environments that cannot
 render**: when the process has no GPU render node (`/dev/dri`), no `/dev/nvidia*`

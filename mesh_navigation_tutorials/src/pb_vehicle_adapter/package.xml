@@ -27,6 +27,9 @@
   <exec_depend>python3-yaml</exec_depend>
 
   <exec_depend>mbf_mesh_nav</exec_depend>
+  <exec_depend>mbf_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>mesh_navigation_tutorials</exec_depend>
   <exec_depend>mesh_navigation_tutorials_sim</exec_depend>
   <exec_depend>octo_planner</exec_depend>

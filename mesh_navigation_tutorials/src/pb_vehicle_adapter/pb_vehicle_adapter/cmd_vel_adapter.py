@@ -199,8 +199,12 @@ class CmdVelAdapter(Node):
             if self._action_states.get(key) != item.status:
                 changed.append(item.status)
             self._action_states[key] = item.status
-        # A newly active goal supersedes a terminal old goal in the same array.
-        if any(s in (GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING) for s in changed):
+        # MBF replaces the old path after accepting the new one. These can be
+        # separate status messages: the new goal may already be EXECUTING when
+        # the old goal changes to ABORTED. Inspect all current goals, otherwise
+        # periodic replanning would inhibit a controller that is still active.
+        if any(item.status in (GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING)
+               for item in message.status_list):
             self._motion_inhibited = False
         elif any(s in (GoalStatus.STATUS_CANCELING, GoalStatus.STATUS_CANCELED,
                        GoalStatus.STATUS_ABORTED) for s in changed):

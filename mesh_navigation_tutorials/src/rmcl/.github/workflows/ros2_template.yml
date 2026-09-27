@@ -1,0 +1,57 @@
+name: ros2_template
+
+on:
+  workflow_call:
+    inputs:
+      docker_base_image:
+        required: true
+        type: string
+      ros_distro:
+        required: true
+        type: string
+
+jobs:
+  colcon-build:
+    name: build
+    runs-on: ubuntu-latest
+
+    container:
+      image: ${{ inputs.docker_base_image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        id: action_ros_ci_step
+        uses: ros-tooling/action-ros-ci@v0.4
+        with:
+          package-name: rmcl rmcl_msgs rmcl_ros
+          target-ros2-distro: ${{ inputs.ros_distro }}
+          vcs-repo-file-url: $GITHUB_WORKSPACE/source_dependencies.yaml
+          rosdep-check: true
+          no-symlink-install: true
+          skip-tests: true
+
+  colcon-test:
+    name: test
+    runs-on: ubuntu-latest
+    needs: colcon-build
+
+    container: 
+      image: ${{ inputs.docker_base_image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # TODO: Figure out how to reuse the state from the colcon-build job
+      - name: Test
+        uses: ros-tooling/action-ros-ci@v0.4
+        with:
+          package-name: rmcl rmcl_msgs rmcl_ros
+          target-ros2-distro: ${{ inputs.ros_distro }}
+          vcs-repo-file-url: $GITHUB_WORKSPACE/source_dependencies.yaml
+          rosdep-check: true
+          no-symlink-install: true
+          skip-tests: false
