@@ -82,17 +82,76 @@ move_base_flex:
     planner_max_retries: 2       # 规划失败重试次数。
     project_path_onto_mesh: false  # 是否把路径投影回网格。false：直接用规划器输出。
 
-    planner_frequency: 1.0       # 【动态避障开关】执行期间周期性重规划 [Hz]；0 = 关闭（这就是默认值）
+    planner_frequency: 20.0       # 【动态避障开关】执行期间周期性重规划 [Hz]；0 = 关闭（这就是默认值）
 
     # ---- 局部控制器（把"往哪走"变成速度指令）--------------------------------
     controllers: ['mesh_controller']  # PB 仿真使用的 MBF 控制器；可改为 mesh_controller。
     mesh_controller:
-      type: 'mesh_controller/MeshController'
-      ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
-                                 # 纯旋转卡死（本项目 -Y 曾因此失败）。
-      lin_vel_factor: 1.0        # 线速度增益倍率。
-      holonomic: true         # 改用 mesh_controller 时，是否按全向底盘控制。
-      # max_angle 未设置时使用控制器默认值，单位为度。
+      # type: 'mesh_controller/MeshController'
+      # ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
+      #                            # 纯旋转卡死（本项目 -Y 曾因此失败）。
+      # lin_vel_factor: 1.0        # 线速度增益倍率。
+      # holonomic: true         # 改用 mesh_controller 时，是否按全向底盘控制。
+      # # max_angle 未设置时使用控制器默认值，单位为度。
+
+      # type 参数用于指定 MeshNav 加载哪个插件作为控制器
+      type: 'mesh_mppi/DiffDriveMPC'
+      # 如果机器人当前位置对应的 MeshMap 代价值大于或等于该值，
+      # 控制器会认为机器人发生了碰撞
+      map_cost_limit: 1.0
+      # 进度检查相关参数
+      progress_check:
+        # 在进度检查的时间窗口内，机器人至少需要移动的距离，单位：米
+        translation_threshold: 0.25
+        # 机器人需要达到的代价降低比例，满足该条件时认为机器人仍在取得进展
+        # 注意：这里使用的代价并不是 MeshMap 中的地图代价！
+        # 这里使用的是代价函数针对优化后的控制信号序列所预测得到的代价
+        cost_reduction_threshold: 0.25
+        # 用于进度检查的时间窗口，单位：秒
+        # 如果在指定时间内，上述任何一个进度条件都没有满足，
+        # 则认为机器人陷入卡住（stuck）状态
+        timeframe: 5.0
+      # 运动学模型相关参数
+      kinematics:
+        # 速度限制
+        linear_velocity_max: 1.5       # 最大线速度
+        linear_velocity_min: -0.25     # 最小线速度，负值表示允许倒车
+        angular_velocity_max: 1.0      # 最大角速度
+        # 加速度限制
+        linear_acceleration_max: 10.0   # 最大线加速度
+        linear_acceleration_min: -3.0  # 最小线加速度 / 最大减速度
+        angular_acceleration_max: 9.0  # 最大角加速度
+      # MPPI 优化器相关参数
+      optimizer:
+        # 向未来预测机器人轨迹时使用的时间步数量
+        prediction_steps: 56
+        # 每次控制器迭代时采样并预测的轨迹数量
+        # 控制器运行频率由 move_base_flex 的 controller_frequency 参数决定
+        prediction_samples: 1000
+        # 用于采样控制信号的标准差
+        # 标准差参数的数量取决于所使用的运动学模型
+        stddev:
+          # 线速度采样标准差，单位：m/s
+          - 0.2
+          # 角速度采样标准差，单位：rad/s
+          - 0.4
+        # 控制器的温度参数
+        temperature: 2.0
+        # 控制器的控制代价参数
+        gamma: 0.015
+      # 代价函数相关参数
+      cost:
+        # 横向跟踪误差（Cross-Track Error, XTE）权重
+        # 用于惩罚机器人偏离参考路径的行为
+        xte_weight: 5.0
+        # 地图代价权重
+        # 用于惩罚机器人进入 MeshMap 分层代价地图中代价较高的区域
+        map_weight: 5.0
+        # 目标代价权重
+        # 用于鼓励控制器让机器人不断朝目标方向前进
+        goal_weight: 10.0
+
+      # 两个type启用一个，前者是mesh_nav自带的全向控制器，后者是mesh_mppi插件，目前据说有动态避障能力，但是没有全向模型
 
     controller_patience: 2.0     # 单次控制步超时 [s]。
     controller_max_retries: 4    # 控制失败重试次数。
@@ -109,7 +168,7 @@ move_base_flex:
       #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
-      mesh_working_file: '/home/rainple/.ros/pb_practical_navigation.h5'
+      mesh_working_file: '/home/rainple/nav_test/mesh_navigation_tutorials/rmuc2026_field.h5'
       #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
       #     mesh_map_working_path 覆盖。它只是缓存，不是源地图；
       #     参数或 PLY 一变就必须重算（见文件头《缓存失效规则》）。
@@ -177,7 +236,7 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['static_combination']
         combination_weight: 1.0
-        inflation_radius: 0.70
+        inflation_radius: 1.0
         #   ↑ **外圈**半径 [m]：距离致命顶点超过此值就不再产生任何代价。
         #     决定"障碍的影响范围有多大"——只影响代价高低，不决定能否通过。
         inscribed_radius: 0.15
@@ -206,23 +265,23 @@ move_base_flex:
         robot_height: 0.15
         #   ↑ 车体高度 [m]：高于它的点云被当作"可以从下面穿过"而忽略，
         #     低于它的才算障碍。**必须按真实车高设**。
-        max_obstacle_dist: 3.0
+        max_obstacle_dist: 5.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
         topic: 'obstacle_points'
         #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。
         #     没有点云时该层不产生任何障碍——静态地图仍可用。
 
+      #【动态障碍膨胀层】
       obstacle_inflation:
-        # 与 static_inflation 完全同理，只是作用在实时障碍上。
-        type: 'mesh_layers/InflationLayer'
-        inputs: ['obstacle']
-        combination_weight: 1.0
-        inflation_radius: 0.30     # 外圈，同 static_inflation，米。
-        inscribed_radius: 0.10 # 内圈，同 static_inflation，米。
-        lethal_value: .inf
-        inscribed_value: 1.0
-        repulsive_field: false
-        cost_scaling_factor: 2.0
+        type: 'mesh_layers/InflationLayer' # 输入是 obstacle 层产生的动态障碍顶点。
+        inputs: ['obstacle'] # 只对实时障碍层进行膨胀。
+        combination_weight: 1.0 # 本层参与后续组合时的权重。
+        inflation_radius: 1.0 # 动态障碍最多影响到多远，单位 m。
+        inscribed_radius: 0.20 # 内圈半径 / 硬安全距离
+        lethal_value: .inf # 障碍本体代价，设置为无穷大
+        inscribed_value: 1.0 # 内圈代价
+        repulsive_field: false # 是否生成斥力向量场
+        cost_scaling_factor: 1.0 # 软膨胀区的代价衰减速度
 
       final:
         # 取静态与动态两张代价图里较大的那个，避免动态障碍被静态代价"稀释"。
