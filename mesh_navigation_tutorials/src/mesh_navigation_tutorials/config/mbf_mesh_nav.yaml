@@ -275,7 +275,7 @@ move_base_flex:
       obstacle_inflation:
         type: 'mesh_layers/InflationLayer' # 输入是 obstacle 层产生的动态障碍顶点。
         inputs: ['obstacle'] # 只对实时障碍层进行膨胀。
-        combination_weight: 1.0 # 本层参与后续组合时的权重。
+        combination_weight: 1.0 # 本层参与后续组合时的权重
         inflation_radius: 1.0 # 动态障碍最多影响到多远，单位 m。
         inscribed_radius: 0.20 # 内圈半径 / 硬安全距离
         lethal_value: .inf # 障碍本体代价，设置为无穷大
