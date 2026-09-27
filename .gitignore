@@ -39,3 +39,4 @@ meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_pluto_sim/model
 # ---- 其他 ----
 field/get-pip.py
 .claude/
+diagnostics/

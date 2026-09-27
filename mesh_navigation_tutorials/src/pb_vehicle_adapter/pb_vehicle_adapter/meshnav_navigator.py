@@ -1,9 +1,11 @@
-"""Coordinate PB Mesh Goal requests with periodic GetPath / ExePath updates.
+"""Coordinate PB Mesh Goal requests with periodic checks of the active route.
 
 All action callbacks run on one executor. New paths use MBF's same-controller
 preemption (setNewPlan); canceling execution before every replan would stop the
-robot and reset MPPI. Epoch and sequence numbers discard superseded results.
+robot and reset controller state. Epoch and sequence numbers discard superseded results.
 """
+
+from copy import deepcopy
 
 import json
 import math
@@ -13,12 +15,44 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from mbf_msgs.action import ExePath, GetPath
+from mbf_msgs.srv import CheckPath
 from rclpy.action import ActionClient
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+
+
+def remaining_path(path, current, progress, window):
+    """Trim passed segments with a bounded forward search (do not jump at loops)."""
+    if not path.poses or current.header.frame_id != path.header.frame_id:
+        raise ValueError("Cannot check route: empty path or mismatched feedback frame")
+    def xyz(pose):
+        p = pose.pose.position
+        return (p.x, p.y, p.z)
+    position = xyz(current)
+    best = (math.inf, progress, deepcopy(path.poses[progress]))
+    distance = 0.0
+    for i in range(progress, len(path.poses) - 1):
+        a, b = xyz(path.poses[i]), xyz(path.poses[i + 1])
+        delta = tuple(y - x for x, y in zip(a, b))
+        length2 = sum(v * v for v in delta)
+        t = max(0.0, min(1.0, sum((p - x) * d for p, x, d in
+                                  zip(position, a, delta)) / length2)) if length2 else 0.0
+        point = tuple(x + t * d for x, d in zip(a, delta))
+        error = sum((p - x) ** 2 for p, x in zip(position, point))
+        if error < best[0]:
+            join = deepcopy(path.poses[i])
+            join.pose.position.x, join.pose.position.y, join.pose.position.z = point
+            best = (error, i, join)
+        distance += math.sqrt(length2)
+        if distance >= window:
+            break
+    result = deepcopy(path)
+    # Check the connector too: a robot off the route must not skip obstacles.
+    result.poses = [deepcopy(current), best[2]] + list(path.poses[best[1] + 1:])
+    return result, best[1]
 
 
 class MeshnavNavigator(Node):
@@ -31,15 +65,26 @@ class MeshnavNavigator(Node):
             "planner": "mesh_planner",
             "controller": "mesh_controller",
             "planner_frequency": 2.0,
-            "replan_stop_distance": 0.4,
+            "check_path_service": "/move_base_flex/check_path_cost",
+            "pose_timeout": 2.0,
+            "path_progress_window": 2.0,
             "action_timeout": 15.0,
         }
         self.cfg = {key: self.declare_parameter(key, value).value
                     for key, value in defaults.items()}
-        if self.cfg["planner_frequency"] < 0 or self.cfg["action_timeout"] <= 0:
-            raise ValueError("planner_frequency must be >= 0 and action_timeout > 0")
+        if (not math.isfinite(self.cfg["planner_frequency"]) or
+                self.cfg["planner_frequency"] < 0 or any(
+                    not math.isfinite(self.cfg[key]) or self.cfg[key] <= 0
+                    for key in ("action_timeout", "pose_timeout", "path_progress_window"))):
+            raise ValueError("Frequency must be finite and >= 0; timeouts and progress window > 0")
         self.planner = ActionClient(self, GetPath, self.cfg["get_path_action"])
         self.controller = ActionClient(self, ExePath, self.cfg["exe_path_action"])
+        self.path_checker = self.create_client(CheckPath, self.cfg["check_path_service"])
+        self.check_busy = False
+        self.active_path = None
+        self.current_pose = None
+        self.pose_received = 0.0
+        self.path_progress = 0
         self.status = self.create_publisher(
             String, "~/status", QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_subscription(PoseStamped, self.cfg["goal_topic"], self.new_goal, 1)
@@ -70,6 +115,8 @@ class MeshnavNavigator(Node):
     def stop(self, state, **fields):
         self.epoch += 1
         self.target = None
+        self.active_path = None
+        self.current_pose = None
         self.stop_started = time.monotonic()
         self.stop_state = state
         if self.plan_handle is not None:
@@ -99,7 +146,7 @@ class MeshnavNavigator(Node):
         return response
 
     def tick(self):
-        busy = self.plan_busy or self.pending_sends or bool(self.executions)
+        busy = self.check_busy or self.plan_busy or self.pending_sends or bool(self.executions)
         if self.target is None:
             if busy:
                 if self.stop_started and time.monotonic() - self.stop_started > self.cfg["action_timeout"]:
@@ -118,18 +165,70 @@ class MeshnavNavigator(Node):
             self.distance = math.inf
             self.plan_count = 0
             self.publish_status("planning", x=self.target.pose.position.x, y=self.target.pose.position.y)
-        if self.plan_busy or self.pending_sends:
+        if self.check_busy or self.plan_busy or self.pending_sends:
             if time.monotonic() - self.request_started > self.cfg["action_timeout"]:
                 self.stop("failed", message="Planning or goal acceptance timed out")
             return
         now = self.get_clock().now().nanoseconds * 1e-9
         frequency = self.cfg["planner_frequency"]
         if self.plan_count:
-            if frequency == 0 or self.distance <= self.cfg["replan_stop_distance"]:
+            if frequency == 0:
                 return
             if now - self.last_plan < 1.0 / frequency:
                 return
-        self.request_plan(now)
+        if self.active_path is None:
+            self.request_plan(now)
+        else:
+            self.last_plan = now
+            self.check_path()
+
+    def check_path(self, candidate=None):
+        if (self.current_pose is None or
+                time.monotonic() - self.pose_received > self.cfg["pose_timeout"]):
+            self.stop("failed", message="No fresh controller pose for route check")
+            return
+        if not self.path_checker.service_is_ready():
+            self.stop("failed", message="Path feasibility service unavailable")
+            return
+        try:
+            path, self.path_progress = remaining_path(
+                self.active_path, self.current_pose, self.path_progress,
+                self.cfg["path_progress_window"])
+        except ValueError as exc:
+            self.stop("failed", message=str(exc))
+            return
+        request = CheckPath.Request()
+        request.path = path
+        request.path_cells_only = True
+        request.costmap = CheckPath.Request.GLOBAL_COSTMAP
+        request.return_on = CheckPath.Response.LETHAL
+        self.check_busy = True
+        self.request_started = time.monotonic()
+        epoch = self.epoch
+        self.path_checker.call_async(request).add_done_callback(
+            lambda future: self.path_checked(future, epoch, candidate))
+
+    def path_checked(self, future, epoch, candidate=None):
+        self.check_busy = False
+        if epoch != self.epoch:
+            return
+        try:
+            response = future.result()
+            state = response.state
+        except Exception as exc:
+            self.stop("failed", message="Route check failed: " + str(exc))
+            return
+        if state == CheckPath.Response.FREE:
+            return  # Keep the current execution, even if a candidate is shorter.
+        if state not in (CheckPath.Response.LETHAL, CheckPath.Response.OUTSIDE):
+            self.stop("failed", message="Route feasibility unknown; navigation stopped")
+            return
+        if candidate is None:
+            self.publish_status("replanning", message="Remaining route is blocked",
+                                check_state=state, blocked_segment=response.last_checked)
+            self.request_plan(self.get_clock().now().nanoseconds * 1e-9)
+        else:
+            self.adopt_plan(candidate, epoch)
 
     def request_plan(self, now):
         goal = GetPath.Goal()
@@ -173,10 +272,20 @@ class MeshnavNavigator(Node):
         except Exception as exc:
             self.stop("failed", message=str(exc))
             return
+        if self.active_path is not None:
+            self.check_path(wrapped)
+        else:
+            self.adopt_plan(wrapped, epoch)
+
+    def adopt_plan(self, wrapped, epoch):
+        result = wrapped.result
         if (wrapped.status != GoalStatus.STATUS_SUCCEEDED or
                 result.outcome != GetPath.Result.SUCCESS or not result.path.poses):
             self.stop("failed", outcome=result.outcome, message="Replan failed: " + result.message)
             return
+        self.active_path = result.path
+        self.last_plan = self.get_clock().now().nanoseconds * 1e-9
+        self.path_progress = 0
         self.plan_count += 1
         self.sequence += 1
         sequence = self.sequence
@@ -193,6 +302,8 @@ class MeshnavNavigator(Node):
     def feedback(self, msg, epoch, sequence):
         if epoch == self.epoch and sequence == self.sequence:
             self.distance = msg.feedback.dist_to_goal
+            self.current_pose = msg.feedback.current_pose
+            self.pose_received = time.monotonic()
 
     def execution_accepted(self, future, epoch, sequence):
         self.pending_sends -= 1

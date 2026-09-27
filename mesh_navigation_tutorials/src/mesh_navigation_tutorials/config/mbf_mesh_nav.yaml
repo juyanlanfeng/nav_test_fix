@@ -51,14 +51,16 @@ meshnav_launch:
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
     startup_timeout_s: '180'         # 导航就绪检查最长等待时间，秒；0 为单次检查。
 
-# PB 的目标协调节点：周期更新路径，新的 exe_path 在服务端平滑替换旧路径。
+# PB 目标协调节点：周期检查剩余路线，只有旧路不可通行时才重规划。
 meshnav_navigator:
   ros__parameters:
     goal_topic: '/rviz/goal_pose'       # RViz Mesh Goal 发布的目标位姿。
     get_path_action: '/move_base_flex/get_path'  # 全局规划 action。
-    exe_path_action: '/move_base_flex/exe_path'  # MPPI 路径执行 action。
-    replan_stop_distance: 0.4          # 距目标小于此值时停止换路，交给控制器完成到点，米。
-    action_timeout: 15.0              # 规划请求或目标接收超时，秒（墙钟）；超时终止导航。
+    exe_path_action: '/move_base_flex/exe_path'  # 路径执行 action。
+    check_path_service: "/move_base_flex/check_path_cost"  # 使用实时 final 代价检查旧路。
+    pose_timeout: 2.0                # 控制器位姿反馈最长允许间隔，秒（墙钟）；过期停车。
+    path_progress_window: 2.0        # 每次从上次进度向前搜索的路径长度，米；防止交叉处跳段。
+    action_timeout: 15.0              # 路线检查、规划或目标接收超时，秒（墙钟）；超时终止导航。
 
 move_base_flex:
   ros__parameters:
@@ -81,30 +83,36 @@ move_base_flex:
     mesh_planner:
       type: 'cvp_mesh_planner/CVPMeshPlanner'
       # type: 'dijkstra_mesh_planner/DijkstraMeshPlanner'
+      step_width: 0.10          # 沿向量场回溯路径的步长 [m]；默认 0.4 在现场弯道回溯失败。
+                                 # 同一停车位置复测：0.4 失败，0.1 / 0.05 均可生成完整路径。
       cost_limit: 0.99           # 【关键联动】顶点代价高于此值即被避开。
                                  # 必须**小于** static_inflation.inscribed_value，
                                  # 否则膨胀层内圈（已判为靠近障碍）也会被当作可通行，
                                  # 规划器会贴着障碍甚至穿过去。当前 0.99 < 1.0，安全。
-      publish_vector_field: true # 发布全局向量场供可视化；当前 MPPI 跟踪输出路径。
+      publish_vector_field: true # 发布向量场供可视化；MeshController 在每次 setPlan 时读取最新规划向量场。
 
     planner_patience: 10.0       # 单次全局规划的超时 [s]，超时后按 max_retries 重试。
-    planner_max_retries: 10       # 规划失败重试次数。
+    planner_max_retries: 2       # 规划失败重试次数。
     project_path_onto_mesh: false  # 是否把路径投影回网格。false：直接用规划器输出。
 
-    planner_frequency: 2.0        # PB meshnav_navigator 行驶期间重新规划的频率 [Hz]；0 只规划一次。
-    controller_frequency: 20.0    # MPPI 控制频率 [Hz]，56 个预测步对应 2.8 秒。
+    planner_frequency: 2.0        # PB 检查旧路是否可通行的频率 [Hz]；可通行不换路，0 只规划一次。
+    path_check_step: 0.025        # 路线检查采样间距 [m]，同时检查路径点之间的线段。
+    path_check_max_distance: 0.4  # 检查点到网格表面的最大投影距离 [m]，不是障碍安全间距。
+                                 # 使用首个规划器的 cost_limit；车体余量由膨胀层提供。
+    controller_frequency: 20.0    # 局部控制器计算与发布速度指令的频率 [Hz]。
 
     # ---- 局部控制器（把"往哪走"变成速度指令）--------------------------------
-    controllers: ['mesh_controller']  # PB 仿真使用的 MBF 控制器；可改为 mesh_controller。
+    controllers: ['mesh_controller']  # MBF 实例名；重规划节点通过此名称更新执行路径。
     mesh_controller:
       type: 'mesh_controller/MeshController'
-      ang_vel_factor: 7.0        # 角速度增益倍率。太小会出现"场方向偏了但转不过去"的
-                                 # 纯旋转卡死（本项目 -Y 曾因此失败）。
-      lin_vel_factor: 1.0        # 线速度增益倍率。
-      holonomic: true         # 改用 mesh_controller 时，是否按全向底盘控制。
-      # max_angle 未设置时使用控制器默认值，单位为度。
+      holonomic: true          # 同时输出车体系 vx、vy、wz，允许全向底盘横移。
+      lin_vel_factor: 1.0      # 平移速度倍率；最终受 max_lin_velocity 限制。
+      ang_vel_factor: 7.0      # 转向速度倍率；最终受 max_ang_velocity 限制。
+      max_lin_velocity: 0.8    # 平面合速度上限 sqrt(vx²+vy²)，米/秒。
+      max_ang_velocity: 0.5    # 角速度上限，弧度/秒，沿用 MeshController 默认值。
+      arrival_fading: 0.5      # 距目标小于此距离时逐渐减速，米。
 
-      # type 参数用于指定 MeshNav 加载哪个插件作为控制器
+      # MPPI 备用配置（当前不加载）。切换时停用上面的控制器参数，再启用下面整段。
       # type: 'mesh_mppi/DiffDriveMPC'
       # # 如果机器人当前位置对应的 MeshMap 代价值大于或等于该值，
       # # 控制器会认为机器人发生了碰撞
@@ -160,8 +168,6 @@ move_base_flex:
       #   # 目标代价权重
       #   # 用于鼓励控制器让机器人不断朝目标方向前进
       #   goal_weight: 10.0
-
-      # 两个type启用一个，前者是mesh_nav自带的全向控制器，后者是mesh_mppi插件，目前据说有动态避障能力，但是没有全向模型
 
     controller_patience: 2.0     # 单次控制步超时 [s]。
     controller_max_retries: 4    # 控制失败重试次数。
@@ -271,14 +277,14 @@ move_base_flex:
       obstacle:
         # 【实时障碍层】由传感器点云动态更新；静态地图没有的障碍靠它避开。
         type: 'mesh_layers/ObstacleLayer'
-        combination_weight: 0.5
-        robot_height: 0.10
+        combination_weight: 1.0
+        robot_height: 0.05
         #   ↑ 点到下方网格的最大投影距离 [m]；默认沿车体 Z 轴向下投影。
         #     此插件虽命名为 robot_height，实际用于过滤点到网格的投影距离，
         #     不会修改车辆几何或地图净空。当前取 0.50，以接收 0.5 m 方块在
         #     不同视角下约 0.22～0.42 m 的回波；按真实车高 0.226 m 设置会漏检。
         #     代价是低空悬物也可能被保守判为障碍，不能据此声称具有净空识别能力。
-        max_obstacle_dist: 3.0
+        max_obstacle_dist: 10.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
         topic: 'obstacle_points'
         #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。
@@ -288,13 +294,13 @@ move_base_flex:
       obstacle_inflation:
         type: 'mesh_layers/InflationLayer' # 输入是 obstacle 层产生的动态障碍顶点。
         inputs: ['obstacle'] # 只对实时障碍层进行膨胀。
-        combination_weight: 0.5 # 本层参与后续组合时的权重
-        inflation_radius: 0.5 # 动态障碍最多影响到多远，单位 m。
-        inscribed_radius: 0.20 # 动态障碍硬安全距离：车体外接半径约 0.356 m + 约 0.044 m 余量，覆盖转弯时车角。
+        combination_weight: 1.0 # 本层参与后续组合时的权重
+        inflation_radius: 0.70 # 动态障碍最多影响到多远，单位 m。
+        inscribed_radius: 0.35 # 动态障碍硬安全距离：车体外接半径约 0.356 m + 约 0.044 m 余量，覆盖转弯时车角。
         lethal_value: .inf # 障碍本体代价，设置为无穷大
-        inscribed_value: 1.0 # 内圈代价
+        inscribed_value: 0.99 # 内圈代价
         repulsive_field: false # 是否生成斥力向量场
-        cost_scaling_factor: 1.0 # 软膨胀区的代价衰减速度
+        cost_scaling_factor: 2.5 # 软膨胀区的代价衰减速度
 
       final:
         # 取静态与动态两张代价图里较大的那个，避免动态障碍被静态代价"稀释"。

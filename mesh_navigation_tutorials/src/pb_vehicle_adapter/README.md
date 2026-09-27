@@ -35,14 +35,26 @@ vehicle sensors. Edit `mesh_navigation_tutorials/config/mbf_mesh_nav.yaml` for
 navigation, localization and map settings. Set `start_sim` to `False` when reusing an
 already running PB simulation.
 
-## Mesh MPPI 动态避障
+## MeshController 全向控制与动态重规划
 
 在上述启动入口中，RViz 的 **Mesh Goal** 发布到 `/rviz/goal_pose`，由
 `meshnav_navigator` 协调 `get_path → exe_path`。它按导航 YAML 中的
-`move_base_flex.planner_frequency`（默认 2 Hz）更新执行路径，距离目标 0.4 m
-以内停止换路，让 MPPI 完成到点。重新点击目标会先取消旧任务；重规划失败时
-取消执行并停车。导航 YAML 的 `meshnav_navigator` 段包含目标话题和超时参数。
+`move_base_flex.planner_frequency`（默认 2 Hz）检查当前剩余路线。**只要旧路仍可通行，
+就不调用规划器、不替换执行路径**，不比较新路是否更短或代价更低。仅在旧路阻断或
+离开网格时请求新规划；新规划返回后再次检查旧路，若已恢复可通行就丢弃新规划。
+检查会裁掉已走过的路段，并检查车到路线的连接段及路径点之间的线段；到目标附近
+也继续检查。`check_path_cost` 使用同一份 final 网格代价和首个规划器的 `cost_limit`，
+膨胀层负责车辆安全余量，检查采样间距为 `path_check_step`（默认 0.025 m）。
+`path_check_max_distance` 是到网格表面的投影容差，不是障碍物膨胀半径。
+重新点击目标会先取消旧任务；旧路不可行且重规划失败、检查服务不可用或位姿反馈
+超时时取消执行并停车。导航 YAML 的 `meshnav_navigator` 段包含服务和超时参数。
+此规则不增加障碍物记忆；雷达漏检导致代价消失的问题需要另行处理。
 这些协调参数在启动时读取，修改 YAML 后重启导航。
+
+当前加载 `mesh_controller/MeshController`，启用 `holonomic: true`，可输出
+`linear.x`、`linear.y` 和 `angular.z`。每次新规划通过同一个 MBF 控制器实例
+更新路径，`setPlan()` 同时读取最新向量场。YAML 中保留了注释掉的 MPPI 备用配置。
+隧道若被障碍代价判为不可通行，或全局重规划失败，切换控制器后仍可能停车。
 
 默认 RViz 配置已移除直接调用 action 的旧 `MbfGoalActions` 面板，避免两个
 客户端同时执行一个目标。不要再用旧测试脚本直接发送 `get_path → exe_path`
@@ -59,7 +71,7 @@ ros2 service call /meshnav_navigator/cancel std_srvs/srv/Trigger '{}'
 `mesh_map.obstacle.robot_height=0.50` 是点云向下投影的距离门限，
 不是修改后的车体高度；这是为了接收稀疏扫描中 0.5 m 方块的高处回波。
 车辆几何和建图净空仍保持原值。该取值会保守地阻挡某些低空悬物。
-动态膨胀内圈取 0.40 m（外接半径约 0.356 m 加余量），MPPI 最大线速度
+动态膨胀内圈取 0.40 m（外接半径约 0.356 m 加余量），控制器最大平面合速度
 取 0.8 m/s。参数与原因均在导航 YAML 中注释。
 
 Setting `spawn_rendering_sensors: "False"` in the YAML spawns the same robot without the two

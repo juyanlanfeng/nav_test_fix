@@ -290,6 +290,14 @@ public:
   /**
    * @brief Returns the stored combined costs
    */
+  // Copy a consistent final-cost snapshot without holding the layer lock while
+  // checking a full route. Dynamic obstacle updates can continue during checks.
+  lvr2::DenseVertexMap<float> vertexCostsSnapshot()
+  {
+    std::lock_guard<std::mutex> lock(layer_mtx);
+    return vertex_costs;
+  }
+
   const lvr2::DenseVertexMap<float>& vertexCosts()
   {
     return vertex_costs;

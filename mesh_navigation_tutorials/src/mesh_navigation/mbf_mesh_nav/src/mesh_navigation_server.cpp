@@ -39,6 +39,8 @@
 
 #include <algorithm>
 #include <functional>
+#include <cmath>
+#include <limits>
 
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <mesh_map/mesh_map.h>
@@ -56,6 +58,8 @@ MeshNavigationServer::MeshNavigationServer(const TFPtr& tf_listener_ptr, const r
   , planner_plugin_loader_("mbf_mesh_core", "mbf_mesh_core::MeshPlanner")
   , mesh_ptr_(new mesh_map::MeshMap(*tf_listener_ptr_, node))
 {
+  node_->declare_parameter("path_check_step", 0.025);
+  node_->declare_parameter("path_check_max_distance", 0.4);
   // advertise services and current goal topic
   check_pose_cost_srv_ =
       node_->create_service<mbf_msgs::srv::CheckPose>("~/check_pose_cost", std::bind(&MeshNavigationServer::callServiceCheckPoseCost, this, _1, _2, _3));
@@ -302,7 +306,93 @@ void MeshNavigationServer::callServiceCheckPoseCost(std::shared_ptr<rmw_request_
 
 void MeshNavigationServer::callServiceCheckPathCost(std::shared_ptr<rmw_request_id_t> request_header, std::shared_ptr<mbf_msgs::srv::CheckPath::Request> request, std::shared_ptr<mbf_msgs::srv::CheckPath::Response> response)
 {
-  // TODO implement
+  using Response = mbf_msgs::srv::CheckPath::Response;
+  response->state = Response::UNKNOWN;
+  // Inflation already encodes vehicle clearance. Footprint checks are unsupported.
+  if (!request->path_cells_only || request->costmap != request->GLOBAL_COSTMAP ||
+      request->skip_poses != 0 || request->path.poses.empty()) return;
+  try
+  {
+    const double step = node_->get_parameter("path_check_step").as_double();
+    const double max_distance = node_->get_parameter("path_check_max_distance").as_double();
+    const auto planners = node_->get_parameter("planners").as_string_array();
+    if (planners.empty()) return;
+    const double limit = node_->get_parameter(planners.front() + ".cost_limit").as_double();
+    if (!std::isfinite(step) || step <= 0 || !std::isfinite(max_distance) ||
+        max_distance <= 0 || !std::isfinite(limit) || limit <= 0) return;
+    std::vector<mesh_map::Vector> points;
+    for (auto pose : request->path.poses)
+    {
+      if (pose.header.frame_id.empty()) pose.header = request->path.header;
+      if (pose.header.frame_id.empty()) return;
+      const auto p = mesh_ptr_->transformToMapFrame(pose).pose.position;
+      if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) return;
+      points.emplace_back(p.x, p.y, p.z);
+    }
+    const auto costs = mesh_ptr_->vertexCostsSnapshot();
+    if (!mesh_ptr_->mesh() || !mesh_ptr_->closestPointQueryInterface()) return;
+    double total_cost = 0;
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      response->last_checked = i;
+      const auto start = points[i == 0 ? 0 : i - 1];
+      const auto delta = points[i] - start;
+      const double length = delta.length();
+      // Bound malformed requests rather than blocking the executor indefinitely.
+      if (!std::isfinite(length) || length / step > 100000) return;
+      const size_t samples = std::max<size_t>(1, std::ceil(length / step));
+      for (size_t j = (i == 0 ? 0 : 1); j <= samples; ++j)
+      {
+        auto position = start + delta * (static_cast<float>(j) / samples);
+        const lvr2::Vector3f query(position.x, position.y, position.z);
+        const auto closest = mesh_ptr_->closestPointQueryInterface()->getClosestPoint(query);
+        if (!closest) return;
+        if ((closest->point - query).norm() > max_distance)
+        { response->state = Response::OUTSIDE; return; }
+        const auto vertices = mesh_ptr_->mesh()->getVerticesOfFace(closest->face);
+        const auto triangle = mesh_ptr_->mesh()->getVertexPositionsOfFace(closest->face);
+        const auto as_double = [](const mesh_map::Vector& v) {
+          return Eigen::Vector3d(v.x, v.y, v.z);
+        };
+        const Eigen::Vector3d a = as_double(triangle[0]);
+        const Eigen::Vector3d ab = as_double(triangle[1]) - a;
+        const Eigen::Vector3d ac = as_double(triangle[2]) - a;
+        const Eigen::Vector3d ap = closest->point.cast<double>() - a;
+        const double denominator = ab.squaredNorm() * ac.squaredNorm() - std::pow(ab.dot(ac), 2);
+        if (denominator <= 1e-20) return;  // Degenerate triangle: unknown, never free.
+        const double v = (ac.squaredNorm() * ap.dot(ab) - ab.dot(ac) * ap.dot(ac)) / denominator;
+        const double w = (ab.squaredNorm() * ap.dot(ac) - ab.dot(ac) * ap.dot(ab)) / denominator;
+        std::array<double, 3> weights{1 - v - w, v, w};
+        double sum = 0;
+        for (auto& weight : weights)
+        {
+          // The closest point lies on this triangle; allow float rounding at edges.
+          if (!std::isfinite(weight) || weight < -1e-4 || weight > 1 + 1e-4) return;
+          weight = std::clamp(weight, 0.0, 1.0);
+          sum += weight;
+        }
+        for (auto& weight : weights) weight /= sum;
+        double cost = 0;
+        for (size_t k = 0; k < 3; ++k)
+        {
+          if (weights[k] <= 1e-6f) continue;
+          const auto value = costs.get(vertices[k]);
+          if (!value || std::isnan(*value)) return;
+          cost += weights[k] * *value;
+        }
+        if (cost >= limit) { response->state = Response::LETHAL; return; }
+        if (!std::isfinite(cost)) return;
+        total_cost += std::max(0.0, cost);
+      }
+    }
+    response->cost = static_cast<uint32_t>(std::min(
+        total_cost, static_cast<double>(std::numeric_limits<uint32_t>::max())));
+    response->state = Response::FREE;
+  }
+  catch (const std::exception& error)
+  {
+    RCLCPP_WARN(node_->get_logger(), "Path feasibility check failed: %s", error.what());
+  }
 }
 
 void MeshNavigationServer::callServiceClearMesh(std::shared_ptr<rmw_request_id_t> request_header, std::shared_ptr<std_srvs::srv::Empty::Request> request, std::shared_ptr<std_srvs::srv::Empty::Response> response)
