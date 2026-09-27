@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+include(${CMAKE_CURRENT_LIST_DIR}/rmagine-cuda-config-version.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rmagine-cuda-targets.cmake)
+
+# include(CMakeFindDependencyMacro)
+# find_dependency(Eigen3)
+# find_dependency(assimp)
+
+include(CMakeFindDependencyMacro)
+if(@CUDAToolkit_FOUND@)
+    find_dependency(CUDAToolkit)
+else(@CUDAToolkit_FOUND@)
+    find_dependency(CUDA)
+endif(@CUDAToolkit_FOUND@)
+
+include(CheckLanguage)
+check_language(CUDA)    
+
+check_required_components(cuda)
+
+set(rmagine_cuda_FOUND 1)

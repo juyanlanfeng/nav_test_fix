@@ -1,0 +1,25 @@
+@PACKAGE_INIT@
+
+include(${CMAKE_CURRENT_LIST_DIR}/rmagine-embree-config-version.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rmagine-embree-targets.cmake)
+
+include(CMakeFindDependencyMacro)
+
+# This workspace uses a locally installed Embree 4.4.0.
+# Downstream packages such as RMCL load this file through find_package(rmagine),
+# so the Embree location must also be available here.
+set(
+  embree_DIR
+  "$ENV{HOME}/opt/embree-4.4.0/lib/cmake/embree-4.4.0"
+)
+
+find_dependency(
+  embree
+  4
+  CONFIG
+  REQUIRED
+)
+
+check_required_components(embree)
+
+set(rmagine_embree_FOUND 1)
