@@ -92,7 +92,7 @@ move_base_flex:
       publish_vector_field: true # 发布向量场供可视化；MeshController 在每次 setPlan 时读取最新规划向量场。
 
     planner_patience: 10.0       # 单次全局规划的超时 [s]，超时后按 max_retries 重试。
-    planner_max_retries: 2       # 规划失败重试次数。
+    planner_max_retries: 10       # 规划失败重试次数。
     project_path_onto_mesh: false  # 是否把路径投影回网格。false：直接用规划器输出。
 
     planner_frequency: 2.0        # PB 检查旧路是否可通行的频率 [Hz]；可通行不换路，0 只规划一次。
@@ -277,6 +277,10 @@ move_base_flex:
       obstacle:
         # 【实时障碍层】由传感器点云动态更新；静态地图没有的障碍靠它避开。
         type: 'mesh_layers/ObstacleLayer'
+
+        down_axis: [0.0, 0.0, -1.0]
+        axis_frame: 'map'
+
         combination_weight: 1.0
         robot_height: 0.20
         #   ↑ 点到下方网格的最大投影距离 [m]；默认沿车体 Z 轴向下投影。
