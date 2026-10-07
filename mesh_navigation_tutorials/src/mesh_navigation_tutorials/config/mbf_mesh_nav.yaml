@@ -282,7 +282,7 @@ move_base_flex:
         axis_frame: 'map'
 
         combination_weight: 1.0
-        robot_height: 0.20
+        robot_height: 0.50
         #   ↑ 点到下方网格的最大投影距离 [m]；默认沿车体 Z 轴向下投影。
         #     此插件虽命名为 robot_height，实际用于过滤点到网格的投影距离，
         #     不会修改车辆几何或地图净空。当前取 0.50，以接收 0.5 m 方块在
@@ -290,7 +290,7 @@ move_base_flex:
         #     代价是低空悬物也可能被保守判为障碍，不能据此声称具有净空识别能力。
         max_obstacle_dist: 5.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
-        topic: 'obstacle_points'
+        topic: '/dynamic_obstacles' # obstacle_points
         #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。
         #     没有点云时该层不产生任何障碍——静态地图仍可用。
 
@@ -299,8 +299,8 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer' # 输入是 obstacle 层产生的动态障碍顶点。
         inputs: ['obstacle'] # 只对实时障碍层进行膨胀。
         combination_weight: 1.0 # 本层参与后续组合时的权重
-        inflation_radius: 0.70 # 动态障碍最多影响到多远，单位 m。
-        inscribed_radius: 0.35 # 动态障碍硬安全距离：车体外接半径约 0.356 m + 约 0.044 m 余量，覆盖转弯时车角。
+        inflation_radius: 0.60 # 动态障碍最多影响到多远，单位 m。
+        inscribed_radius: 0.30 # 动态障碍硬安全距离：车体外接半径约 0.356 m + 约 0.044 m 余量，覆盖转弯时车角。
         lethal_value: .inf # 障碍本体代价，设置为无穷大
         inscribed_value: 0.99 # 内圈代价
         repulsive_field: false # 是否生成斥力向量场

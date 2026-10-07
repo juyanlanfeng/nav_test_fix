@@ -1,0 +1,60 @@
+# 两个节点通过同一个参数文件启动；参数类型应保持为原生 bool/double/string/数组。
+# 节点名称需与 launch 中的 name 一致：obstacle_sub、cloud_tf_publisher。
+
+/**:
+  ros__parameters:
+    # --- 共享配置：仅影响加载本文件的节点 ---
+    use_sim_time: true
+    # 使用 Gazebo 的 /clock；实车或没有 /clock 的独立运行设为 false。
+
+    base_frame: 'base_footprint'
+    # 车体参考坐标系；通常应与输入里程计的 child_frame_id 一致。
+
+    lidar_frame: 'front_mid360'
+    # 单帧雷达点云的坐标系，必须与输入点云的 header.frame_id 一致。
+
+obstacle_sub:
+  ros__parameters:
+    # --- 点云输入与输出 ---
+    input_cloud_topic: '/cloud'
+    # 去畸变后的单帧 sensor_msgs/PointCloud2；点坐标属于 lidar_frame。
+
+    output_cloud_topic: '/dynamic_obstacles'
+    # 背景差分后的障碍点云话题；输出 XYZ 属于 odom_frame，保留采样时间。
+
+    # --- 固定背景与差分 ---
+    pcd_file_path: '/home/rainple/nav_test/field/pcd/rmuc2026_field.pcd'
+    # 当前 Gazebo 场地的静态背景 PCD，采用绝对路径；更换设备或地图时修改此项。
+    # 背景点坐标必须已与 odom_frame 对齐，单纯修改坐标系名称不会进行地图配准。
+
+    distance_threshold: 0.05
+    # 背景匹配距离容差 [m]；扫描点距最近背景点大于此值时保留为差异点。
+    # 代码传入 SegmentDifferences 时会平方；此处填写实际距离，不填写距离平方。
+
+    # --- 比较坐标系 ---
+    odom_frame: 'odom'
+    # 将单帧点云变换到此坐标系后与背景比较，也是输出点云的 frame_id。
+    # 当前仿真 PCD、Gazebo 世界及 odom 坐标重合；实车需确认定位与背景的对齐关系。
+
+cloud_tf_publisher:
+  ros__parameters:
+    # --- 里程计输入 ---
+    odom_topic: '/odom'
+    # nav_msgs/Odometry 输入；按消息的父子坐标系、测量时间和 pose 广播动态 TF。
+    # 里程计应与背景使用同一参考坐标，并为共享 base_frame 提供位姿。
+
+    # 仿真下不需要静态tf
+    need_static_tf: false
+    # 仿真也不需要动态tf
+    need_odom_tf: false
+
+    # --- base_frame -> lidar_frame 的固定安装外参 ---
+    lidar_xyz: [0.10, 0.0, 0.216]
+    # 雷达测量原点在 base_frame 中的位置 [x, y, z]，单位 [m]。
+    # 当前 SDF 的 Z = 0.076（chassis）+ 0.11（雷达 link）+ 0.03（测量原点）。
+    # /cloud 原始 XYZ 以测量原点为基准，所以这里包含额外的 0.03 m。
+    # URDF 同名 link 原点为 0.186 m；此节点应独立维护雷达 TF，避免重复发布。
+
+    lidar_rpy: [0.0, 0.0, 0.0]
+    # 雷达相对 base_frame 的安装角 [roll, pitch, yaw]，单位 [rad]。
+    # 当前仿真没有安装旋转；实车填写标定值。XYZ/RPY 数组均须包含 3 个浮点数。
