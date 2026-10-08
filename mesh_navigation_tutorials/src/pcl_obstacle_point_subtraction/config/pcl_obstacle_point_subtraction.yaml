@@ -36,6 +36,9 @@ obstacle_sub:
     # 将单帧点云变换到此坐标系后与背景比较，也是输出点云的 frame_id。
     # 当前仿真 PCD、Gazebo 世界及 odom 坐标重合；实车需确认定位与背景的对齐关系。
 
+    robot_radius: 0.4
+    # 机器人半径，过滤机器人自身点云
+
 cloud_tf_publisher:
   ros__parameters:
     # --- 里程计输入 ---

@@ -288,7 +288,7 @@ move_base_flex:
         #     不会修改车辆几何或地图净空。当前取 0.50，以接收 0.5 m 方块在
         #     不同视角下约 0.22～0.42 m 的回波；按真实车高 0.226 m 设置会漏检。
         #     代价是低空悬物也可能被保守判为障碍，不能据此声称具有净空识别能力。
-        max_obstacle_dist: 5.0
+        max_obstacle_dist: 8.0
         #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
         topic: '/dynamic_obstacles' # obstacle_points
         #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。

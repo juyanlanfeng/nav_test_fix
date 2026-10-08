@@ -9,9 +9,12 @@
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
+#include <pcl/common/transforms.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/segmentation/segment_differences.h>
+
+#include <Eigen/Geometry>
 
 class ObstacleSubNode : public rclcpp::Node {
 private:
@@ -22,6 +25,7 @@ private:
 
     // 配置值统一由 launch 加载的 YAML 提供，CPP 中只保留成员及参数类型。
     double distance_threshold_;
+    double robot_radius_;
     std::string static_pcd_file_;
     std::string input_topic_;
     std::string output_topic_;
@@ -43,6 +47,8 @@ private:
     geometry_msgs::msg::TransformStamped lidar_to_odom_;
     geometry_msgs::msg::TransformStamped odom_to_lidar_;
 
+    pcl::SegmentDifferences<pcl::PointXYZ> segment_;
+
 public:
     ObstacleSubNode(const std::string& node_name): Node(node_name) {
       
@@ -54,6 +60,7 @@ public:
         base_frame_ = this->declare_parameter<std::string>("base_frame");
         lidar_frame_ = this->declare_parameter<std::string>("lidar_frame");
         odom_frame_ = this->declare_parameter<std::string>("odom_frame");
+        robot_radius_ = this->declare_parameter<double>("robot_radius");
 
         this->tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         this->tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
@@ -78,6 +85,9 @@ public:
         );
 
         dynamic_obstacles_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_topic_, 10);
+
+        segment_.setTargetCloud(static_cloud_); // 同一坐标系下的固定背景
+        // 静态地图只加载一次
     }
 
     // 处理输入的点云
@@ -125,33 +135,53 @@ public:
         lidar_to_odom_.child_frame_id = lidar_frame_;
         lidar_to_odom_.transform = tf2::toMsg(T_odom_lidar);
 
+        // 将点云从“sensor”也就是点云中心变换到odom
         tf2::doTransform(*msg, current_cloud_odom_, lidar_to_odom_);
 
         // 将当前单帧点云转为 PCL；此时点坐标仍在消息标记的源坐标系中。
         pcl::fromROSMsg(current_cloud_odom_, *current_cloud_odom_pcl_);
 
-        pcl::SegmentDifferences<pcl::PointXYZ> segment;
-        segment.setInputCloud(current_cloud_odom_pcl_);  // 已变换到 odom 的实时扫描
-        segment.setTargetCloud(static_cloud_); // 同一坐标系下的固定背景
+        segment_.setInputCloud(current_cloud_odom_pcl_);  // 已变换到 odom 的实时扫描
         // 此接口接收距离阈值平方，输出扫描中与背景不匹配的点。
-        segment.setDistanceThreshold(distance_threshold_ * distance_threshold_);
-        segment.segment(*obstacle_cloud_);
-
-        sensor_msgs::msg::PointCloud2 obstacle_msg;
-        pcl::toROSMsg(*obstacle_cloud_, obstacle_msg);
+        segment_.setDistanceThreshold(distance_threshold_ * distance_threshold_);
+        segment_.segment(*obstacle_cloud_); // 性能问题暂时不管
 
         // ----------------------- 变回车体系 -----------------------------------
+        // 这里不是原路返回了，而是直接将点云从odom变到footprint
         // mesh的obstacle_layer中的max_obstacle_dist是以obstacle点云中心来计算的,所以obstacle点云必须变换回车体系
-        odom_to_lidar_.header.stamp = msg->header.stamp;
-        odom_to_lidar_.header.frame_id = lidar_frame_;
-        odom_to_lidar_.child_frame_id = odom_frame_;
-        odom_to_lidar_.transform = tf2::toMsg(T_footprint_lidar * T_odom_footprint);
+        auto odom_to_lidar = tf2::toMsg(T_odom_footprint);
 
-        tf2::doTransform(obstacle_msg, obstacle_msg, odom_to_lidar_);
+        Eigen::Affine3f tf_matrix = Eigen::Affine3f::Identity();
+        tf_matrix.translation() = Eigen::Vector3f(
+            odom_to_lidar.translation.x,
+            odom_to_lidar.translation.y,
+            odom_to_lidar.translation.z
+        );
+        tf_matrix.rotate(Eigen::Quaternionf(
+            odom_to_lidar.rotation.w,
+            odom_to_lidar.rotation.x,
+            odom_to_lidar.rotation.y,
+            odom_to_lidar.rotation.z
+        ));
+        
+        pcl::PointCloud<pcl::PointXYZ> cloud_in_footprint;
+        pcl::transformPointCloud(*obstacle_cloud_, cloud_in_footprint, tf_matrix);
         // ----------------------------------------------------------------------
 
+        // 滤除车体自身的点云
+        pcl::PointCloud<pcl::PointXYZ> filtered_obstacle_cloud;
+        for (const auto &point : cloud_in_footprint) {
+            float distance = std::hypot(point.x, point.y);
+            if (distance >= robot_radius_)
+            {
+                filtered_obstacle_cloud.push_back(point);
+            }
+        }
+
+        sensor_msgs::msg::PointCloud2 obstacle_msg;
+        pcl::toROSMsg(filtered_obstacle_cloud, obstacle_msg);
         obstacle_msg.header = msg->header; // 保留原单帧点云的采样时间
-        obstacle_msg.header.frame_id = lidar_frame_;
+        obstacle_msg.header.frame_id = base_frame_;
         dynamic_obstacles_publisher_->publish(obstacle_msg);
     }
 };
