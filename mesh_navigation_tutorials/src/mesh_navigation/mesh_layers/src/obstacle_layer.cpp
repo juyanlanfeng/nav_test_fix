@@ -3,7 +3,10 @@
 #include <mesh_map/timer.h>
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <iterator>
 
 
 namespace mesh_layers
@@ -15,7 +18,7 @@ std::optional<rclcpp::QoS> get_qos_profile_from_string(const std::string& str)
   {
     return rclcpp::QoS(1).reliable();
   }
-  else if ("BestEffort")
+  else if ("BestEffort" == str)
   {
     return rclcpp::QoS(1).best_effort();
   }
@@ -32,6 +35,7 @@ bool ObstacleLayer::initialize()
   // Read parameters
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "robot_height";
     desc.description = "The height of the robot in meter. "
     "Obstacles with a larger distance to the surface along the vertical axis are not added to the cost map. "
@@ -42,6 +46,7 @@ bool ObstacleLayer::initialize()
   }
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "max_obstacle_dist";
     desc.description = "The maximum distance to the sensor origin ([0.0, 0.0, 0.0] in the reference frame of the input point cloud!) an obstacle point may have. "
     "Obstacles with larger distances to the (sensor) origin are not processed and added to the map. "
@@ -51,6 +56,7 @@ bool ObstacleLayer::initialize()
   }
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "topic";
     desc.description = "The ROS topic to subscribe to. The message type must be PointCloud2! "
       "This parameter is not reconfigurable at runtime!";
@@ -59,6 +65,7 @@ bool ObstacleLayer::initialize()
   }
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "qos";
     desc.description = "The QoS settings to use when subscribing to the ROS topic. Options are 'Reliable' and 'BestEffort'. "
       "This parameter is not reconfigurable at runtime!";
@@ -76,14 +83,21 @@ bool ObstacleLayer::initialize()
   }
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "tf_tolerance";
     desc.description = "The time to wait for transforms in seconds.";
     desc.type = rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE;
     const double tf_tolerance = node_->declare_parameter(desc.name, config_.tf_tolerance.seconds(), desc);
+    if (!std::isfinite(tf_tolerance) || tf_tolerance < 0.0 || tf_tolerance > 60.0)
+    {
+      RCLCPP_ERROR(get_logger(), "tf_tolerance must be in [0, 60] seconds");
+      return false;
+    }
     config_.tf_tolerance = rclcpp::Duration::from_seconds(tf_tolerance);
   }
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "down_axis";
     desc.description = "The vector to use when projecting obstacle points to the surface. "
       "Defaults to [0.0, 0.0, -1.0]. This parameter is not reconfigurable at runtime!";
@@ -95,10 +109,17 @@ bool ObstacleLayer::initialize()
       RCLCPP_ERROR(get_logger(), "Invalid parameter value for 'down_axis'! Must be exactly 3 values!");
       return false;
     }
-    config_.down_axis = lvr2::Vector3f(dir[0], dir[1], dir[2]).normalized();
+    const Eigen::Vector3d axis(dir[0], dir[1], dir[2]);
+    if (!axis.allFinite() || !std::isfinite(axis.norm()) || axis.norm() < 1e-12)
+    {
+      RCLCPP_ERROR(get_logger(), "down_axis must be a finite nonzero vector");
+      return false;
+    }
+    config_.down_axis = axis.normalized().cast<float>();
   }
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
+    desc.read_only = fixed_parameters_;
     desc.name = layer_namespace_ + '.' + "axis_frame";
     desc.description = "The reference frame of the 'down_axis' parameter. Defaults to the value of the robot_frame parameter. "
       "This parameter is not reconfigurable at runtime!";
@@ -110,9 +131,22 @@ bool ObstacleLayer::initialize()
   }
 
   // Support reconfiguration of parameters at runtime
-  dyn_params_handler_ = node_->add_on_set_parameters_callback(
-    std::bind(&ObstacleLayer::reconfigureCallback, this, std::placeholders::_1)
-  );
+  if (config_.topic.empty() || config_.axis_frame_id.empty() ||
+      std::isnan(config_.robot_height) || config_.robot_height < 0.0 ||
+      std::isnan(config_.max_obstacle_dist) || config_.max_obstacle_dist <= 0.0 ||
+      (fixed_parameters_ && (!std::isfinite(config_.robot_height) ||
+                             !std::isfinite(config_.max_obstacle_dist))))
+  {
+    RCLCPP_ERROR(get_logger(), "Invalid obstacle projection parameters");
+    return false;
+  }
+  if (!fixed_parameters_)
+  {
+    dyn_params_handler_ = node_->add_on_set_parameters_callback(
+      std::bind(&ObstacleLayer::reconfigureCallback, this, std::placeholders::_1));
+  }
+
+  if (!configureProjection()) return false;
 
   // Setup a callback group for multithreaded ros callback execution
   callback_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -131,167 +165,175 @@ bool ObstacleLayer::initialize()
 }
 
 
-void ObstacleLayer::processPointCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg)
+namespace
 {
-  RCLCPP_DEBUG(get_logger(), "Processing point cloud with %u points", msg->width * msg->height);
-  mesh_map::LayerTimer::TimePoint t0 = mesh_map::LayerTimer::Clock::now();
-
-  const auto map = map_ptr_.lock();
-  if (nullptr == map)
+bool xyzOffsets(const sensor_msgs::msg::PointCloud2& msg, std::array<uint32_t, 3>& offsets)
+{
+  if (msg.header.frame_id.empty() || msg.point_step == 0 ||
+      uint64_t(msg.row_step) < uint64_t(msg.width) * msg.point_step ||
+      uint64_t(msg.data.size()) < uint64_t(msg.row_step) * msg.height ||
+      (msg.height == 0 && msg.width != 0))
+    return false;
+  const std::array<std::string, 3> names{"x", "y", "z"};
+  for (size_t i = 0; i < names.size(); ++i)
   {
-    RCLCPP_ERROR(get_logger(), "Could not update cost map: Failed to lock map_ptr_");
-    return;
-  }
-
-  const auto raycaster = map->raycaster();
-  if (nullptr == map)
-  {
-    RCLCPP_ERROR(get_logger(), "Could not get raycasting interface from map! nullptr == raycaster");
-    return;
-  }
-
-  mesh_map::LayerTimer::TimePoint t1 = mesh_map::LayerTimer::Clock::now();
-
-  // Get transform from message to map frame
-  geometry_msgs::msg::TransformStamped tf;
-  try
-  {
-    tf = map->tf2Buffer().lookupTransform(
-      map->mapFrame(),
-      msg->header.frame_id,
-      msg->header.stamp,
-      config_.tf_tolerance
-    );
-  }
-  catch (const tf2::TransformException& ex)
-  {
-    RCLCPP_ERROR(
-      get_logger(),
-      "Failed to lookup transform from %s -> %s: %s",
-      msg->header.frame_id.c_str(), map->mapFrame().c_str(), ex.what()
-    );
-    return;
-  }
-  RCLCPP_DEBUG(get_logger(), "Got transform from %s -> %s", msg->header.frame_id.c_str(), map->mapFrame().c_str());
-
-  // Convert TF2 transform to Eigen Isometry3
-  Eigen::Quaternionf quat(tf.transform.rotation.w, tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z);
-  quat.normalize();
-  Eigen::Isometry3f eigen_tf(
-    Eigen::Translation3f(tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z) * quat
-  );
-
-  // Transform the axis from the axis_frame_id to map
-  lvr2::Vector3f transformed_axis = config_.down_axis;
-  try
-  {
-    geometry_msgs::msg::TransformStamped axis_tf = map->tf2Buffer().lookupTransform(
-      map->mapFrame(),
-      config_.axis_frame_id,
-      msg->header.stamp,
-      config_.tf_tolerance
-    );
-
-    // Rotate the down_axis vector
-    Eigen::Quaternionf quat(axis_tf.transform.rotation.w, axis_tf.transform.rotation.x, axis_tf.transform.rotation.y, axis_tf.transform.rotation.z);
-    quat.normalize();
-    transformed_axis = quat * config_.down_axis;
-  }
-  catch (const tf2::TransformException& ex)
-  {
-    RCLCPP_ERROR(
-      get_logger(),
-      "Failed to lookup transform from %s -> %s: %s",
-      config_.axis_frame_id.c_str(), map->mapFrame().c_str(), ex.what()
-    );
-    return;
-  }
-  RCLCPP_DEBUG(
-    get_logger(), "Transformed down_axis from %s -> %s; Axis: [%f.2, %f.2, %f.2]",
-    config_.axis_frame_id.c_str(), map->mapFrame().c_str(), transformed_axis.x(), transformed_axis.y(), transformed_axis.z()
-  );
-
-  // Convert to lvr2 representation and filter by distance!
-  std::vector<lvr2::Vector3f> origins;
-  sensor_msgs::PointCloud2ConstIterator<float> x_it(*msg, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> y_it(*msg, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> z_it(*msg, "z");
-  for(;x_it != x_it.end() && y_it != y_it.end() && z_it != z_it.end(); ++x_it, ++y_it, ++z_it)
-  {
-    lvr2::Vector3f p(*x_it, *y_it, *z_it);
-    if (p.norm() <= config_.max_obstacle_dist)
+    size_t found = 0;
+    for (const auto& field : msg.fields)
     {
-      // Transform to map frame
-      origins.push_back(eigen_tf * p);
+      if (field.name != names[i]) continue;
+      if (++found != 1 || field.datatype != sensor_msgs::msg::PointField::FLOAT32 ||
+          field.count != 1 || uint64_t(field.offset) + sizeof(float) > msg.point_step)
+        return false;
+      offsets[i] = field.offset;
+    }
+    if (found != 1) return false;
+  }
+  for (size_t i = 0; i < offsets.size(); ++i)
+    for (size_t j = i + 1; j < offsets.size(); ++j)
+      if (uint64_t(offsets[i]) < uint64_t(offsets[j]) + sizeof(float) &&
+          uint64_t(offsets[j]) < uint64_t(offsets[i]) + sizeof(float)) return false;
+  return true;
+}
+
+float readFloat(const uint8_t* data, bool swap)
+{
+  uint8_t bytes[sizeof(float)];
+  std::memcpy(bytes, data, sizeof(float));
+  if (swap) std::reverse(std::begin(bytes), std::end(bytes));
+  float result;
+  std::memcpy(&result, bytes, sizeof(float));
+  return result;
+}
+}  // namespace
+
+bool ObstacleLayer::validCloudLayout(const sensor_msgs::msg::PointCloud2& msg)
+{
+  std::array<uint32_t, 3> offsets;
+  return xyzOffsets(msg, offsets);
+}
+
+bool ObstacleLayer::transformToEigen(
+  const geometry_msgs::msg::Transform& tf, Eigen::Isometry3d& output)
+{
+  const Eigen::Vector3d translation(tf.translation.x, tf.translation.y, tf.translation.z);
+  Eigen::Quaterniond rotation(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z);
+  if (!translation.allFinite() || !rotation.coeffs().allFinite() ||
+      !std::isfinite(rotation.norm()) || rotation.norm() < 1e-12)
+    return false;
+  rotation.normalize();
+  output = Eigen::Translation3d(translation) * rotation;
+  return true;
+}
+
+bool ObstacleLayer::projectObservations(
+  const sensor_msgs::msg::PointCloud2& msg, ProjectedFrame& output,
+  const Eigen::Vector3d& range_origin_in_cloud)
+{
+  output.observations.clear();
+  std::array<uint32_t, 3> offsets;
+  const auto map = map_ptr_.lock();
+  if (!map || !map->mesh() || !map->raycaster() ||
+      !xyzOffsets(msg, offsets) || !range_origin_in_cloud.allFinite())
+  {
+    RCLCPP_WARN_THROTTLE(get_logger(), *node_->get_clock(), 5000,
+      "Skipping obstacle frame: invalid XYZ layout or unavailable mesh/raycaster");
+    return false;
+  }
+
+  Eigen::Isometry3d map_from_axis;
+  try
+  {
+    const auto cloud_tf = map->tf2Buffer().lookupTransform(
+      map->mapFrame(), msg.header.frame_id, msg.header.stamp, config_.tf_tolerance);
+    const auto axis_tf = map->tf2Buffer().lookupTransform(
+      map->mapFrame(), config_.axis_frame_id, msg.header.stamp, config_.tf_tolerance);
+    if (!transformToEigen(cloud_tf.transform, output.map_from_cloud) ||
+        !transformToEigen(axis_tf.transform, map_from_axis)) return false;
+  }
+  catch (const tf2::TransformException& ex)
+  {
+    RCLCPP_WARN_THROTTLE(get_logger(), *node_->get_clock(), 5000,
+      "Skipping obstacle frame: %s", ex.what());
+    return false;
+  }
+
+  // Respect organized cloud row padding and the wire byte order. Non-finite returns
+  // are skipped, as in ordinary PointCloud2 processing; malformed layouts fail above.
+  const uint16_t endian_probe = 1;
+  const bool host_bigendian = *reinterpret_cast<const uint8_t*>(&endian_probe) == 0;
+  std::vector<lvr2::Vector3f> origins;
+  std::vector<Eigen::Vector3d> points_in_map;
+  origins.reserve(size_t(msg.width) * msg.height);
+  points_in_map.reserve(size_t(msg.width) * msg.height);
+  for (uint32_t row = 0; row < msg.height; ++row)
+  {
+    for (uint32_t col = 0; col < msg.width; ++col)
+    {
+      const auto* data = msg.data.data() + size_t(row) * msg.row_step + size_t(col) * msg.point_step;
+      const bool swap = msg.is_bigendian != host_bigendian;
+      const Eigen::Vector3d point(readFloat(data + offsets[0], swap),
+        readFloat(data + offsets[1], swap), readFloat(data + offsets[2], swap));
+      if (!point.allFinite() ||
+          (point - range_origin_in_cloud).norm() > config_.max_obstacle_dist) continue;
+      const Eigen::Vector3d world = output.map_from_cloud * point;
+      if (!world.allFinite() || !world.cast<float>().allFinite()) continue;
+      origins.emplace_back(world.cast<float>());
+      points_in_map.push_back(world);
     }
   }
 
-  // Allocate buffers
-  std::vector<lvr2::Vector3f> dirs(origins.size(), transformed_axis);
+  // A valid empty observation still required both TFs, but no raycast.
+  if (origins.empty()) return true;
+  const lvr2::Vector3f direction =
+    (map_from_axis.rotation() * config_.down_axis.cast<double>()).cast<float>();
+  std::vector<lvr2::Vector3f> directions(origins.size(), direction);
   std::vector<mesh_map::MeshMap::RayCastResult> results(origins.size());
   std::vector<uint8_t> hits(origins.size());
-
-  RCLCPP_DEBUG(
-    get_logger(),
-    "Casting %lu rays; Robot height: %f; Max obstacle dist: %f",
-    origins.size(), config_.robot_height, config_.max_obstacle_dist
-  );
-  raycaster->castRays(origins, dirs, results, hits);
-
-  // Update the lethal vertices and cost map
-  // Create new cost map and lethal set
-  lvr2::SparseVertexMap<float> costs;
-  std::set<lvr2::VertexHandle> lethals;
-  for (size_t idx = 0; idx < hits.size(); idx++)
+  map->raycaster()->castRays(origins, directions, results, hits);
+  output.observations.reserve(origins.size());
+  for (size_t i = 0; i < hits.size(); ++i)
   {
-    if (hits[idx] && results[idx].dist <= config_.robot_height)
-    {
-      const lvr2::FaceHandle face(results[idx].face_id);
-      for (const auto vertex: map->mesh()->getVerticesOfFace(face))
-      {
-        costs.insert(vertex, std::numeric_limits<float>::infinity());
-        lethals.insert(vertex);
-      }
-    }
+    if (!hits[i] || !std::isfinite(results[i].dist) || results[i].dist < 0 ||
+        results[i].dist > config_.robot_height) continue;
+    const lvr2::FaceHandle face(results[i].face_id);
+    output.observations.push_back({points_in_map[i], face, map->mesh()->getVerticesOfFace(face)});
   }
+  return true;
+}
 
-  RCLCPP_DEBUG(get_logger(), "Found %lu lethal vertices", lethals.size());
-
-  // Find all vertices that are no longer considered lethal
-  std::set<lvr2::VertexHandle> no_longer_lethal;
-  std::set_difference(
-    lethals_.begin(), lethals_.end(),
-    lethals.begin(), lethals.end(),
-    std::inserter(no_longer_lethal, no_longer_lethal.end())
-  );
-
-  // All vertices that have changed
+size_t ObstacleLayer::commitLethalSet(
+  const rclcpp::Time& stamp, std::set<lvr2::VertexHandle> active_vertices)
+{
   std::set<lvr2::VertexHandle> changed;
-  std::set_symmetric_difference(
-    lethals_.begin(), lethals_.end(),
-    lethals.begin(), lethals.end(),
-    std::inserter(changed, changed.end())
-  );
-
   {
-    // Update the cost map and lethal vertices
-    // Aquire a write lock to prevent race conditions.
-    // We use a scope here to unlock the write lock after we are done updating
-    // the layer data.
-    auto wlock = this->writeLock();
+    auto lock = writeLock();
+    std::set_symmetric_difference(lethals_.begin(), lethals_.end(),
+      active_vertices.begin(), active_vertices.end(), std::inserter(changed, changed.end()));
+    if (changed.empty()) return 0;
+    lvr2::SparseVertexMap<float> costs;
+    for (const auto vertex : active_vertices)
+      costs.insert(vertex, std::numeric_limits<float>::infinity());
     costs_ = std::move(costs);
-    lethals_ = std::move(lethals);
+    lethals_ = std::move(active_vertices);
   }
-  mesh_map::LayerTimer::TimePoint t2 = mesh_map::LayerTimer::Clock::now();
+  // Release the write lock before downstream layers read our new state.
+  notifyChange(stamp, changed);
+  return changed.size();
+}
 
-  RCLCPP_DEBUG(get_logger(), "calling notifyChange() with %lu changed vertices", changed.size());
-  // Our write lock has to be unlocked before we call notifyChange to prevent
-  // a deadlock when other layers are notified and try to read this layer!
-  this->notifyChange(msg->header.stamp, changed);
-  mesh_map::LayerTimer::TimePoint t3 = mesh_map::LayerTimer::Clock::now();
-
-  // Log timing information for debug purposes, see \ref mesh_map::LayerTimer for more information
-  mesh_map::LayerTimer::recordUpdateDuration(layer_name_, msg->header.stamp, t1 - t0, t2 - t1, t3 - t2);
+void ObstacleLayer::processPointCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg)
+{
+  const auto start = mesh_map::LayerTimer::Clock::now();
+  ProjectedFrame frame;
+  if (!projectObservations(*msg, frame)) return;
+  std::set<lvr2::VertexHandle> active;
+  for (const auto& observation : frame.observations)
+    active.insert(observation.vertices.begin(), observation.vertices.end());
+  const auto projected = mesh_map::LayerTimer::Clock::now();
+  commitLethalSet(rclcpp::Time(msg->header.stamp, node_->get_clock()->get_clock_type()), std::move(active));
+  const auto finished = mesh_map::LayerTimer::Clock::now();
+  mesh_map::LayerTimer::recordUpdateDuration(layer_name_, msg->header.stamp,
+    mesh_map::LayerTimer::Duration::zero(), projected - start, finished - projected);
 }
 
 

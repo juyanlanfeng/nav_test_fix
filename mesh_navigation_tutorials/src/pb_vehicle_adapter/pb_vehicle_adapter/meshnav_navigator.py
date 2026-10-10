@@ -1,7 +1,7 @@
 """接收 RViz 目标，协调 MBF 规划、执行和当前路线的可通行性检查。
 
-节点使用一个执行器处理回调。旧路可通行时继续执行；确认阻断后才申请新路。
-新路径交给同一个 MBF 控制器实例更新，避免先取消执行造成车辆停车。
+节点使用一个执行器处理回调。旧路可通行时继续执行；确认阻断后先停车再申请新路。
+短暂无路时在时限内保持停止并重试，不继续执行已知受阻的旧路线。
 epoch 区分前后两次导航任务，sequence 区分同一任务内前后两条执行路径。
 """
 
@@ -95,6 +95,8 @@ class MeshnavNavigator(Node):
             "pose_timeout": 2.0,  # 控制器反馈位姿允许的最大墙钟间隔，秒。
             "path_progress_window": 2.0,  # 每次在旧路径上向前寻找连接点的长度，米。
             "action_timeout": 15.0,  # 检查、规划或目标接收允许的最长墙钟时间，秒。
+            "replan_patience": 15.0,  # 受阻后停车等待有效新路线的总时限，秒（墙钟）。
+            "replan_retry_period": 0.5,  # 短暂无路时两次请求的最小间隔，秒（墙钟）。
         }
         # 声明参数并读回最终值，统一存放在 cfg 中供回调使用。
         self.cfg = {key: self.declare_parameter(key, value).value
@@ -103,7 +105,8 @@ class MeshnavNavigator(Node):
         if (not math.isfinite(self.cfg["planner_frequency"]) or
                 self.cfg["planner_frequency"] < 0 or any(
                     not math.isfinite(self.cfg[key]) or self.cfg[key] <= 0
-                    for key in ("action_timeout", "pose_timeout", "path_progress_window"))):
+                    for key in ("action_timeout", "pose_timeout", "path_progress_window",
+                                "replan_patience", "replan_retry_period"))):
             raise ValueError("Frequency must be finite and >= 0; timeouts and progress window > 0")
         # 两个 action 客户端分别负责产生路径和让控制器执行路径。
         self.planner = ActionClient(self, GetPath, self.cfg["get_path_action"])
@@ -135,6 +138,9 @@ class MeshnavNavigator(Node):
         self.request_started = 0.0  # 最近一次异步请求开始的墙钟时间。
         self.stop_started = None  # 开始等待旧任务取消完成的墙钟时间。
         self.stop_state = None  # 最近一次 stop 的原因，用于发布取消完成状态。
+        self.waiting_for_replan_stop = False
+        self.replan_deadline = None
+        self.retry_plan_at = 0.0
         # 20 Hz 轮询任务状态；稳态时钟可在仿真时间暂停时继续处理取消。
         self.timer = self.create_timer(
             0.05, self.tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
@@ -156,6 +162,9 @@ class MeshnavNavigator(Node):
         self.target = None
         self.active_path = None
         self.current_pose = None
+        self.waiting_for_replan_stop = False
+        self.replan_deadline = None
+        self.retry_plan_at = 0.0
         # 使用墙钟统计取消等待时间；state 记录这次停止的原因。
         self.stop_started = time.monotonic()
         self.stop_state = state
@@ -223,6 +232,16 @@ class MeshnavNavigator(Node):
             self.distance = math.inf
             self.plan_count = 0
             self.publish_status("planning", x=self.target.pose.position.x, y=self.target.pose.position.y)
+        if self.replan_deadline is not None and time.monotonic() >= self.replan_deadline:
+            self.stop("failed", message="No feasible replacement route within replan_patience")
+            return
+        if self.waiting_for_replan_stop:
+            # 旧 action 完成取消前不规划，否则起点会在规划过程中继续移动。
+            if self.executions or self.pending_sends:
+                return
+            self.waiting_for_replan_stop = False
+        if time.monotonic() < self.retry_plan_at:
+            return
         # 已有检查、规划或新执行目标尚未被接收时，不重复发请求。
         if self.check_busy or self.plan_busy or self.pending_sends:
             # 这里用墙钟发现请求迟迟不返回；随后 stop 会取消仍在执行的旧目标。
@@ -231,6 +250,10 @@ class MeshnavNavigator(Node):
             return
         # 检查频率按 ROS 时间计算；定时器本身使用前述稳态时钟运行。
         now = self.get_clock().now().nanoseconds * 1e-9
+        if self.active_path is None:
+            self.retry_plan_at = 0.0
+            self.request_plan(now)
+            return
         frequency = self.cfg["planner_frequency"]
         # 初次规划无需等待；已有路径时按频率间隔进行可行性检查。
         if self.plan_count:
@@ -239,16 +262,12 @@ class MeshnavNavigator(Node):
                 return
             if now - self.last_plan < 1.0 / frequency:
                 return
-        # 首次进入任务还没有路径，向全局规划器申请第一条路线。
-        if self.active_path is None:
-            self.request_plan(now)
-        else:
-            # 现有路线只检查，不因为有更短候选路线就强制切换。
-            self.last_plan = now
-            self.check_path()
+        # 现有路线只检查，不因为有更短候选路线就强制切换。
+        self.last_plan = now
+        self.check_path()
 
-    def check_path(self, candidate=None):
-        """异步检查旧路；candidate 是规划完成但尚未决定是否采用的新路。"""
+    def check_path(self):
+        """异步检查当前剩余路线。"""
         # 必须有足够新的控制器反馈位姿，才能裁掉已经走过的路段。
         if (self.current_pose is None or
                 time.monotonic() - self.pose_received > self.cfg["pose_timeout"]):
@@ -278,12 +297,11 @@ class MeshnavNavigator(Node):
         self.check_busy = True
         self.request_started = time.monotonic()
         epoch = self.epoch
-        # 回调携带 candidate；旧路可行时直接丢弃这条候选新路。
         self.path_checker.call_async(request).add_done_callback(
-            lambda future: self.path_checked(future, epoch, candidate))
+            lambda future: self.path_checked(future, epoch))
 
-    def path_checked(self, future, epoch, candidate=None):
-        """根据 CheckPath 返回值决定保留旧路、重规划或采用候选路线。"""
+    def path_checked(self, future, epoch):
+        """可行则保留旧路；受阻则先取消执行，再从停止后的位置规划。"""
         # 请求已经结束；如果所属任务换过了，就忽略这个迟到响应。
         self.check_busy = False
         if epoch != self.epoch:
@@ -296,21 +314,22 @@ class MeshnavNavigator(Node):
             # 服务调用出错时停止，避免在未知代价上继续导航。
             self.stop("failed", message="Route check failed: " + str(exc))
             return
-        # 旧路仍然畅通：直接维持当前 ExePath，候选新路即使更短也不用。
+        # 旧路仍然畅通：直接维持当前 ExePath。
         if state == CheckPath.Response.FREE:
             return
         # UNKNOWN 等状态不能证实“旧路被阻断”，也不能证实“安全可走”。
         if state not in (CheckPath.Response.LETHAL, CheckPath.Response.OUTSIDE):
             self.stop("failed", message="Route feasibility unknown; navigation stopped")
             return
-        # 首次确认旧路被阻断：记录阻断段，再向规划器申请替代路线。
-        if candidate is None:
-            self.publish_status("replanning", message="Remaining route is blocked",
-                                check_state=state, blocked_segment=response.last_checked)
-            self.request_plan(self.get_clock().now().nanoseconds * 1e-9)
-        else:
-            # 新规划返回后复查仍阻断，才把候选路径交给控制器。
-            self.adopt_plan(candidate, epoch)
+        self.publish_status("replanning", message="Remaining route is blocked; stopping before replanning",
+                            check_state=state, blocked_segment=response.last_checked)
+        self.sequence += 1  # 旧执行的取消结果不能结束仍然有效的导航目标。
+        self.active_path = None
+        self.waiting_for_replan_stop = True
+        self.replan_deadline = time.monotonic() + self.cfg["replan_patience"]
+        self.retry_plan_at = 0.0
+        for handle in list(self.executions.values()):
+            handle.cancel_goal_async()
 
     def request_plan(self, now):
         """请求 MBF 从当前车位规划到本次任务目标。"""
@@ -356,7 +375,7 @@ class MeshnavNavigator(Node):
             handle.cancel_goal_async()
 
     def plan_done(self, future, epoch):
-        """处理规划结果；重规划完成后先复查旧路再决定是否换路。"""
+        """处理从停止位置请求的新路线。"""
         # 规划 action 已结束，清理忙标记和可取消句柄。
         self.plan_busy = False
         self.plan_handle = None
@@ -370,12 +389,7 @@ class MeshnavNavigator(Node):
         except Exception as exc:
             self.stop("failed", message=str(exc))
             return
-        # 已在执行旧路：候选路径返回后，再检查一次旧路当前代价。
-        if self.active_path is not None:
-            self.check_path(wrapped)
-        else:
-            # 没有旧路时，这个结果是首次规划，可直接进入结果验证。
-            self.adopt_plan(wrapped, epoch)
+        self.adopt_plan(wrapped, epoch)
 
     def adopt_plan(self, wrapped, epoch):
         """验证候选规划并向同一个 MBF 控制器下发新执行路径。"""
@@ -383,8 +397,17 @@ class MeshnavNavigator(Node):
         result = wrapped.result
         if (wrapped.status != GoalStatus.STATUS_SUCCEEDED or
                 result.outcome != GetPath.Result.SUCCESS or not result.path.poses):
+            if (self.replan_deadline is not None and result.outcome in (
+                    GetPath.Result.NO_PATH_FOUND, GetPath.Result.BLOCKED_START,
+                    GetPath.Result.BLOCKED_GOAL)):
+                self.retry_plan_at = time.monotonic() + self.cfg["replan_retry_period"]
+                self.publish_status("waiting_for_path", outcome=result.outcome,
+                                    message="Stopped; waiting for a feasible replacement route")
+                return
             self.stop("failed", outcome=result.outcome, message="Replan failed: " + result.message)
             return
+        self.replan_deadline = None
+        self.retry_plan_at = 0.0
         # 保存被采用的完整路径，后续周期检查都基于它。
         self.active_path = result.path
         # 从采用新路的时刻开始计算下次周期检查间隔。
@@ -438,8 +461,8 @@ class MeshnavNavigator(Node):
         self.executions[sequence] = handle
         handle.get_result_async().add_done_callback(
             lambda f: self.execution_done(f, epoch, sequence))
-        # 等待接收期间若任务已更换，马上取消这个迟到的执行目标。
-        if epoch != self.epoch:
+        # 等待接收期间若任务已更换或旧路线已受阻，取消迟到的执行目标。
+        if epoch != self.epoch or sequence != self.sequence:
             handle.cancel_goal_async()
 
     def execution_done(self, future, epoch, sequence):

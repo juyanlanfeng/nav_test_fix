@@ -24,7 +24,7 @@
 # 【缓存失效规则】以下任一变化后，旧的 <map>.h5 必须删除并重算，否则你会拿到
 # 一张与新参数不匹配的层缓存，表现为"改了参数但行为没变"：
 #       - PLY 的顶点 / 三角形 / 坐标变化
-#       - 本文件里任何 MeshLayer 参数变化
+#       - 静态 MeshLayer 参数变化（动态 obstacle 历史不读写 HDF5，仅需重启）
 #       - MeshMap / HDF5 格式实现变化
 #    操作：备份或删除 mesh_map.mesh_working_file 指向的 HDF5 文件，然后重启导航；
 #    首次启动会从 mesh_map.mesh_file 指向的 PLY 重算。
@@ -61,6 +61,8 @@ meshnav_navigator:
     pose_timeout: 2.0                # 控制器位姿反馈最长允许间隔，秒（墙钟）；过期停车。
     path_progress_window: 2.0        # 每次从上次进度向前搜索的路径长度，米；防止交叉处跳段。
     action_timeout: 15.0              # 路线检查、规划或目标接收超时，秒（墙钟）；超时终止导航。
+    replan_patience: 15.0            # 旧路受阻后先停车；短暂无路时等待重试的总时限，秒（墙钟）。
+    replan_retry_period: 0.5         # 停车重规划的请求间隔，秒（墙钟）；不沿已知受阻旧路继续行驶。
 
 move_base_flex:
   ros__parameters:
@@ -275,24 +277,37 @@ move_base_flex:
         #     调小 ⇒ 整片区域都保持较高代价（更居中走）。
 
       obstacle:
-        # 【实时障碍层】由传感器点云动态更新；静态地图没有的障碍靠它避开。
-        type: 'mesh_layers/ObstacleLayer'
-
+        # 历史只在内存中；有效观测驱动过期。以下参数修改后重启导航生效。
+        # 回退时把 type 改回 mesh_layers/ObstacleLayer，原插件注册仍保留。
+        type: 'mesh_layers/TemporalObstacleLayer'
+        topic: '/dynamic_obstacles'  # 正常无障碍时也需要有效空帧；断流保持已有代价。
+        qos: 'Reliable'
+        tf_tolerance: 0.10           # TF 最长等待时间 [s]，等待后再次检查消息年龄。
         down_axis: [0.0, 0.0, -1.0]
         axis_frame: 'map'
-
         combination_weight: 1.0
-        robot_height: 0.50
-        #   ↑ 点到下方网格的最大投影距离 [m]；默认沿车体 Z 轴向下投影。
-        #     此插件虽命名为 robot_height，实际用于过滤点到网格的投影距离，
-        #     不会修改车辆几何或地图净空。当前取 0.50，以接收 0.5 m 方块在
-        #     不同视角下约 0.22～0.42 m 的回波；按真实车高 0.226 m 设置会漏检。
-        #     代价是低空悬物也可能被保守判为障碍，不能据此声称具有净空识别能力。
-        max_obstacle_dist: 8.0
-        #   ↑ 只考虑这个距离 [m] 内的障碍点，防止远处噪声拖慢更新。
-        topic: '/dynamic_obstacles' # obstacle_points
-        #   ↑ 实时障碍点云（sensor_msgs/PointCloud2）的输入话题。
-        #     没有点云时该层不产生任何障碍——静态地图仍可用。
+        robot_height: 0.50          # 回波到 mesh 沿投影方向的最大距离 [m]。
+        max_obstacle_dist: 8.0       # 相对真实雷达测量原点的三维标记/清除范围 [m]。
+
+        history_voxel_size: 0.05     # 按三维体素 + 命中面去重，保留真实回波高度 [m]。
+        clearing_mode: 'stvl'       # STVL 时间衰减；视野内没有回波不等于已确认空闲。
+        decay_model: 0             # 0 线性寿命，1 指数衰减，-1 持久保留。
+        obstacle_keep_time: 10.0    # 对应 STVL voxel_decay；线性模式最后检测后保留 10 s。
+        decay_acceleration: 0.0    # 视野加速系数 [1/s²]；箱体遮挡场景先关闭，保留绕行所需历史。
+                                   # 正值启用 STVL a*t³/6 加速，不能代替遮挡/自由空间检测。
+        max_observation_age: 0.30    # 超龄、重复、乱序帧均不修改历史 [s]；超龄日志提示检查上游积压。
+
+        sensor_frame: 'front_mid360'
+        sensor_offset_xyz: [0.0, 0.0, 0.03]  # 雷达 link 到测量原点的局部偏移 [m]。
+        min_sensor_range: 0.10
+        horizontal_fov_deg: 360.0
+        vertical_fov_min_deg: -7.0
+        vertical_fov_max_deg: 52.0
+
+        localization_reference_frame: 'odom'
+        pose_jump_translation: 0.75   # 定位平移跳变阈值 [m]，工程初值。
+        pose_jump_rotation_deg: 45.0  # 定位旋转跳变阈值 [deg]。
+        pose_jump_max_interval: 0.20  # 相邻雷达位姿跳变检查的最大间隔 [s]。
 
       #【动态障碍膨胀层】
       obstacle_inflation:

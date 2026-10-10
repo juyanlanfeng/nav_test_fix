@@ -1,28 +1,29 @@
 {
-  "source_pcd": "/home/rainple/nav_test/field/pcd/rmuc2026_field.pcd",
-  "source_sha256": "ebc0add17e2a229abed880926f4f01baf89ca9a8fe7a34d80b8b2b07b986adc7",
+  "source_pcd": "/home/rainple/nav_test/field/pcd/2.pcd",
+  "source_sha256": "6d68504350db9da1f817738415963aa05bc2a8bf5338f196b18e141ea409eba7",
   "encoding": "binary",
   "fields": [
     "x",
     "y",
-    "z"
+    "z",
+    "intensity"
   ],
-  "points_declared": 631508,
-  "header_bytes": 174,
-  "trailing_padding_bytes": 0,
-  "finite_points": 631508,
+  "points_declared": 1506339,
+  "header_bytes": 192,
+  "trailing_padding_bytes": 3904,
+  "finite_points": 1506339,
   "nonfinite_points_removed": 0,
   "valid_supplied_normals": 0,
   "bounds": {
     "min": [
-      -14.859999656677246,
-      -8.020000457763672,
-      -0.05999999865889549
+      -14.493483543395996,
+      -13.94000244140625,
+      -1.272996425628662
     ],
     "max": [
-      14.859999656677246,
-      8.020000457763672,
-      0.8999999761581421
+      17.205501556396484,
+      8.915321350097656,
+      4.997256755828857
     ]
   }
 }

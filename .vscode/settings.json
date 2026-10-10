@@ -1,3 +1,5 @@
 {
-    "cmake.sourceDirectory": "/home/rainple/nav_test/dddmr_navigation/src/dddmr_semantic_segmentation"
+    "cmake.sourceDirectory": "${workspaceFolder}/mesh_navigation_tutorials/src/mesh_navigation/mesh_layers",
+    "cmake.buildDirectory": "${workspaceFolder}/mesh_navigation_tutorials/build/mesh_layers",
+    "cmake.configureOnOpen": false
 }

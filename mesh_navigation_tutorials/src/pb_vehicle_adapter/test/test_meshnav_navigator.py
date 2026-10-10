@@ -2,7 +2,7 @@
 
 from concurrent.futures import Future
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from action_msgs.msg import GoalStatus
 from mbf_msgs.action import ExePath, GetPath
@@ -33,6 +33,11 @@ def navigator():
     node.target = object()
     node.queued_target = None
     node.plan_count = 2
+    node.waiting_for_replan_stop = False
+    node.replan_deadline = None
+    node.retry_plan_at = 0.0
+    node.cfg = dict(replan_patience=15.0, replan_retry_period=0.5,
+                    action_timeout=15.0, planner_frequency=2.0, controller='mesh_controller')
     node.publish_status = Mock()
     return node
 
@@ -114,45 +119,113 @@ def path(points):
     return p
 
 
-def test_free_old_route_never_plans_or_adopts_cheaper_candidate():
+def test_free_old_route_never_replans():
     node = navigator()
     node.request_plan = Mock()
     node.adopt_plan = Mock()
     response = completed(CheckPath.Response(state=CheckPath.Response.FREE))
     node.path_checked(response, 1)
-    node.path_checked(response, 1, SimpleNamespace(cost=0.0))
     node.request_plan.assert_not_called()
     node.adopt_plan.assert_not_called()
     assert node.target is not None
 
 
-def test_blocked_old_route_requests_planning():
+def test_blocked_old_route_stops_execution_before_requesting_plan():
     node = navigator()
     node.request_plan = Mock()
     node.get_clock = Mock()
     node.get_clock.return_value.now.return_value.nanoseconds = 10**9
+    handle = Mock()
+    node.executions = {2: handle}
     node.path_checked(completed(CheckPath.Response(state=CheckPath.Response.LETHAL)), 1)
+    handle.cancel_goal_async.assert_called_once()
+    node.tick()
+    node.request_plan.assert_not_called()
+    node.execution_done(completed(SimpleNamespace(
+        status=GoalStatus.STATUS_CANCELED, result=ExePath.Result())), 1, 2)
+    assert node.target is not None
+    node.tick()
     node.request_plan.assert_called_once_with(1.0)
 
 
-def test_candidate_only_adopted_when_old_route_still_blocked():
+def test_late_execution_acceptance_is_canceled_after_blocked_route():
     node = navigator()
-    node.adopt_plan = Mock()
-    candidate = object()
-    node.path_checked(completed(CheckPath.Response(state=CheckPath.Response.LETHAL)),
-                      1, candidate)
-    node.adopt_plan.assert_called_once_with(candidate, 1)
+    node.pending_sends = 1
+    node.path_checked(completed(CheckPath.Response(state=CheckPath.Response.LETHAL)), 1)
+    handle = Mock(accepted=True)
+    handle.get_result_async.return_value = Future()
+    node.execution_accepted(completed(handle), 1, 2)
+    handle.cancel_goal_async.assert_called_once()
 
 
-def test_planning_result_requires_second_old_route_check_even_on_failure():
+def test_temporary_no_path_waits_before_retry_and_keeps_original_goal():
     node = navigator()
-    node.active_path = path([(0, 0), (1, 0)])
-    node.check_path = Mock()
+    node.replan_deadline = 115.0
+    node.request_plan = Mock()
+    node.get_clock = Mock()
+    node.get_clock.return_value.now.return_value.nanoseconds = 10**9
     result = GetPath.Result(outcome=GetPath.Result.NO_PATH_FOUND)
     wrapped = SimpleNamespace(status=GoalStatus.STATUS_ABORTED, result=result)
-    node.plan_done(completed(wrapped), 1)
-    node.check_path.assert_called_once_with(wrapped)
+    with patch('pb_vehicle_adapter.meshnav_navigator.time.monotonic', return_value=100.0):
+        node.plan_done(completed(wrapped), 1)
+        node.tick()
+    node.request_plan.assert_not_called()
+    assert node.retry_plan_at == 100.5
     assert node.target is not None
+    assert node.publish_status.call_args.args[0] == 'waiting_for_path'
+    with patch('pb_vehicle_adapter.meshnav_navigator.time.monotonic', return_value=100.5):
+        node.tick()
+    node.request_plan.assert_called_once_with(1.0)
+
+
+def test_replan_deadline_cancels_inflight_request_and_stops_retrying():
+    node = navigator()
+    node.replan_deadline = 100.0
+    node.plan_busy = True
+    handle = Mock()
+    node.plan_handle = handle
+    with patch('pb_vehicle_adapter.meshnav_navigator.time.monotonic', return_value=100.0):
+        node.tick()
+    handle.cancel_goal_async.assert_called_once()
+    assert node.target is None
+    assert node.replan_deadline is None
+    assert node.publish_status.call_args.args[0] == 'failed'
+
+
+def test_invalid_goal_does_not_enter_temporary_no_path_retry():
+    node = navigator()
+    node.replan_deadline = 1e20
+    result = GetPath.Result(outcome=GetPath.Result.INVALID_GOAL)
+    node.plan_done(completed(SimpleNamespace(status=GoalStatus.STATUS_ABORTED, result=result)), 1)
+    assert node.target is None
+    assert node.retry_plan_at == 0.0
+
+
+def test_successful_replan_clears_retry_deadline():
+    node = navigator()
+    node.replan_deadline = 1e20
+    node.retry_plan_at = 1.0
+    node.get_clock = Mock()
+    node.get_clock.return_value.now.return_value.nanoseconds = 10**9
+    node.controller = Mock()
+    node.controller.send_goal_async.return_value = Future()
+    result = GetPath.Result(path=path([(0, 0), (1, 0)]))
+    node.plan_done(completed(SimpleNamespace(status=GoalStatus.STATUS_SUCCEEDED, result=result)), 1)
+    assert node.replan_deadline is None
+    assert node.retry_plan_at == 0.0
+    node.controller.send_goal_async.assert_called_once()
+
+
+def test_user_cancel_discards_scheduled_retry():
+    node = navigator()
+    node.replan_deadline = 1e20
+    node.retry_plan_at = 1e20
+    node.request_plan = Mock()
+    node.stop('cancel_requested')
+    node.tick()
+    node.request_plan.assert_not_called()
+    assert node.replan_deadline is None
+    assert node.retry_plan_at == 0.0
 
 
 def test_unknown_check_stops_instead_of_treating_old_route_as_free():

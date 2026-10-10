@@ -70,4 +70,12 @@
             The obstacle points are projected onto the map's surface by casting a ray along the robots down axis.
         </description>
     </class>
+    <class name="mesh_layers/TemporalObstacleLayer"
+            type="mesh_layers::TemporalObstacleLayer"
+            base_class_type="mesh_map::AbstractLayer">
+        <description>
+            Obstacle layer with observation history, STVL lidar frustum expiry,
+            and clearing gated by valid sensor observations.
+        </description>
+    </class>
 </library>

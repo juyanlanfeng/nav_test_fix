@@ -11,6 +11,7 @@ endif()
 find_package(ament_cmake_ros REQUIRED)
 find_package(mesh_map REQUIRED)
 find_package(lvr2 REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(OpenMP)
 
 pluginlib_export_plugin_description_file(mesh_map mesh_layers.xml)
@@ -25,6 +26,8 @@ add_library(${PROJECT_NAME}
   src/clearance_layer.cpp
   src/combination_layer.cpp
   src/obstacle_layer.cpp
+  src/temporal_obstacle_layer.cpp
+  src/stvl_frustum/three_dimensional_lidar_frustum.cpp
 )
 include_directories(
   include
@@ -35,7 +38,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 
-ament_target_dependencies(${PROJECT_NAME} mesh_map lvr2)
+ament_target_dependencies(${PROJECT_NAME} mesh_map lvr2 geometry_msgs)
 target_compile_definitions(${PROJECT_NAME} PRIVATE "MESH_LAYERS_BUILDING_LIBRARY")
 target_link_libraries(${PROJECT_NAME}
   lvr2::lvr2
@@ -63,9 +66,14 @@ if (BUILD_TESTING)
     $<INSTALL_INTERFACE:include>
   )
   target_link_libraries(${PROJECT_NAME}_inflation_layer_test ${PROJECT_NAME})
+
+  ament_add_gtest(${PROJECT_NAME}_temporal_obstacle_layer_test test/temporal_obstacle_layer_test.cpp
+    TIMEOUT 120)
+  target_include_directories(${PROJECT_NAME}_temporal_obstacle_layer_test PRIVATE src)
+  target_link_libraries(${PROJECT_NAME}_temporal_obstacle_layer_test ${PROJECT_NAME})
 endif()
 
 ament_export_include_directories(include)
 ament_export_libraries(${PROJECT_NAME})
-ament_export_dependencies(mesh_map)
+ament_export_dependencies(mesh_map geometry_msgs)
 ament_package()

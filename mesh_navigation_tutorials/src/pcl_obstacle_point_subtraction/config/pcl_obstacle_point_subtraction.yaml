@@ -20,20 +20,20 @@ obstacle_sub:
     # 去畸变后的单帧 sensor_msgs/PointCloud2；点坐标属于 lidar_frame。
 
     output_cloud_topic: '/dynamic_obstacles'
-    # 背景差分后的障碍点云话题；输出 XYZ 属于 odom_frame，保留采样时间。
+    # 背景差分后变换回 base_frame 的障碍点云，保留原始采样时间。
 
     # --- 固定背景与差分 ---
     pcd_file_path: '/home/rainple/nav_test/field/pcd/rmuc2026_field.pcd'
     # 当前 Gazebo 场地的静态背景 PCD，采用绝对路径；更换设备或地图时修改此项。
     # 背景点坐标必须已与 odom_frame 对齐，单纯修改坐标系名称不会进行地图配准。
 
-    distance_threshold: 0.05
+    distance_threshold: 0.08
     # 背景匹配距离容差 [m]；扫描点距最近背景点大于此值时保留为差异点。
-    # 代码传入 SegmentDifferences 时会平方；此处填写实际距离，不填写距离平方。
+    # 代码传入 PCL 最近邻差分算法时会平方；此处填写实际距离，不填写距离平方。
 
     # --- 比较坐标系 ---
     odom_frame: 'odom'
-    # 将单帧点云变换到此坐标系后与背景比较，也是输出点云的 frame_id。
+    # 将单帧点云变换到此坐标系后与背景比较，再变换回 base_frame 输出。
     # 当前仿真 PCD、Gazebo 世界及 odom 坐标重合；实车需确认定位与背景的对齐关系。
 
     robot_radius: 0.4

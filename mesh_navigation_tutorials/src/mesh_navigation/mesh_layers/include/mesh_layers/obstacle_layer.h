@@ -41,6 +41,10 @@
 #include <mesh_map/abstract_layer.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <Eigen/Geometry>
+#include <geometry_msgs/msg/transform.hpp>
+#include <array>
+#include <vector>
 
 namespace mesh_layers
 {
@@ -109,18 +113,59 @@ public:
    */
   virtual const std::set<lvr2::VertexHandle>& lethals() override { return lethals_; }
 
-private:
+protected:
+  struct ProjectedObservation
+  {
+    Eigen::Vector3d point_in_map;
+    lvr2::FaceHandle face;
+    std::array<lvr2::VertexHandle, 3> vertices;
+  };
+
+  struct ProjectedFrame
+  {
+    Eigen::Isometry3d map_from_cloud = Eigen::Isometry3d::Identity();
+    std::vector<ProjectedObservation> observations;
+  };
+
   /**
    * @brief initializes this layer plugin
    *
    * @return true if initialization was successfull; else false
    */
   virtual bool initialize() override;
+  // Called after parameter declaration and before the subscription can run.
+  virtual bool configureProjection() { return true; }
 
   /**
    * @brief Compute the lethal vertices and cost map from a point cloud message.
    */
-  void processPointCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg);
+  virtual void processPointCloud(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg);
+
+  // Failure must not be interpreted as a valid empty observation.
+  bool projectObservations(
+    const sensor_msgs::msg::PointCloud2& msg, ProjectedFrame& output,
+    const Eigen::Vector3d& range_origin_in_cloud = Eigen::Vector3d::Zero());
+  static bool validCloudLayout(const sensor_msgs::msg::PointCloud2& msg);
+  static bool transformToEigen(
+    const geometry_msgs::msg::Transform& transform, Eigen::Isometry3d& output);
+  // Returns the number of changed vertices; an unchanged set sends no notification.
+  size_t commitLethalSet(const rclcpp::Time& stamp, std::set<lvr2::VertexHandle> active_vertices);
+
+  bool fixed_parameters_ = false;
+
+  struct ProjectionConfig
+  {
+    double robot_height = std::numeric_limits<float>::infinity();
+    double max_obstacle_dist = std::numeric_limits<float>::infinity();
+    lvr2::Vector3f down_axis;
+    std::string axis_frame_id;
+    std::string topic;
+    rclcpp::QoS qos = rclcpp::QoS(1).reliable();
+    rclcpp::Duration tf_tolerance = rclcpp::Duration::from_seconds(0.1);
+  } config_;
+
+private:
+  friend struct ObstacleLayerTestAccess;
 
   /**
    * @brief callback for incoming param changes
@@ -139,15 +184,6 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
 
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
-  struct {
-    double robot_height = std::numeric_limits<float>::infinity();
-    double max_obstacle_dist = std::numeric_limits<float>::infinity();
-    lvr2::Vector3f down_axis;
-    std::string axis_frame_id;
-    std::string topic;
-    rclcpp::QoS qos = rclcpp::QoS(1).reliable();
-    rclcpp::Duration tf_tolerance = rclcpp::Duration::from_seconds(0.1);
-  } config_;
 };
 
 } /* namespace mesh_layers */

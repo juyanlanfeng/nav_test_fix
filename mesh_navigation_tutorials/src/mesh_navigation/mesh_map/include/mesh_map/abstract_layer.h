@@ -55,6 +55,10 @@ typedef std::function<void(const std::string&, const rclcpp::Time&, const std::s
 class AbstractLayer
 {
 public:
+  // pluginlib destroys instances through AbstractLayer pointers. Derived resources
+  // (subscriptions, clock jump callbacks and history) must be released as well.
+  virtual ~AbstractLayer() = default;
+
   typedef std::shared_ptr<mesh_map::AbstractLayer> Ptr;
 
   /**

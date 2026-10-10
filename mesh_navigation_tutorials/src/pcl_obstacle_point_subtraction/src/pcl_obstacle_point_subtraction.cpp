@@ -13,6 +13,7 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/segmentation/segment_differences.h>
+#include <pcl/search/kdtree.h>
 
 #include <Eigen/Geometry>
 
@@ -47,7 +48,7 @@ private:
     geometry_msgs::msg::TransformStamped lidar_to_odom_;
     geometry_msgs::msg::TransformStamped odom_to_lidar_;
 
-    pcl::SegmentDifferences<pcl::PointXYZ> segment_;
+    pcl::search::Search<pcl::PointXYZ>::Ptr background_tree_;
 
 public:
     ObstacleSubNode(const std::string& node_name): Node(node_name) {
@@ -79,15 +80,19 @@ public:
         obstacle_cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
         current_cloud_odom_pcl_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
 
-        // 创建订阅器和发布器
+        // 只排队最新扫描；保留采样时间，避免积压点云被下游新鲜度检查拒收。
         cloud_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            input_topic_, 10, std::bind(&ObstacleSubNode::inputCloudCallback, this, std::placeholders::_1)
+            input_topic_, rclcpp::QoS(rclcpp::KeepLast(1)),
+            std::bind(&ObstacleSubNode::inputCloudCallback, this, std::placeholders::_1)
         );
 
-        dynamic_obstacles_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_topic_, 10);
+        dynamic_obstacles_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+            output_topic_, rclcpp::QoS(rclcpp::KeepLast(1)));
 
-        segment_.setTargetCloud(static_cloud_); // 同一坐标系下的固定背景
-        // 静态地图只加载一次
+        // SegmentDifferences::segment() 每帧都会重建背景 KD 树。
+        // 背景固定，建树一次并复用相同的差分算法，避免旧扫描积压。
+        background_tree_.reset(new pcl::search::KdTree<pcl::PointXYZ>(false));
+        if (!static_cloud_->empty()) background_tree_->setInputCloud(static_cloud_);
     }
 
     // 处理输入的点云
@@ -138,30 +143,32 @@ public:
         // 将点云从“sensor”也就是点云中心变换到odom
         tf2::doTransform(*msg, current_cloud_odom_, lidar_to_odom_);
 
-        // 将当前单帧点云转为 PCL；此时点坐标仍在消息标记的源坐标系中。
+        // 将 odom 坐标系下的当前单帧点云转为 PCL。
         pcl::fromROSMsg(current_cloud_odom_, *current_cloud_odom_pcl_);
 
-        segment_.setInputCloud(current_cloud_odom_pcl_);  // 已变换到 odom 的实时扫描
-        // 此接口接收距离阈值平方，输出扫描中与背景不匹配的点。
-        segment_.setDistanceThreshold(distance_threshold_ * distance_threshold_);
-        segment_.segment(*obstacle_cloud_); // 性能问题暂时不管
+        // 与 SegmentDifferences 相同的最近邻差分；阈值仍为距离平方。
+        if (static_cloud_->empty())
+            *obstacle_cloud_ = *current_cloud_odom_pcl_;
+        else
+            pcl::getPointCloudDifference(*current_cloud_odom_pcl_,
+                distance_threshold_ * distance_threshold_, background_tree_, *obstacle_cloud_);
 
         // ----------------------- 变回车体系 -----------------------------------
         // 这里不是原路返回了，而是直接将点云从odom变到footprint
         // mesh的obstacle_layer中的max_obstacle_dist是以obstacle点云中心来计算的,所以obstacle点云必须变换回车体系
-        auto odom_to_lidar = tf2::toMsg(T_odom_footprint);
+        auto odom_to_footprint = tf2::toMsg(T_odom_footprint);
 
         Eigen::Affine3f tf_matrix = Eigen::Affine3f::Identity();
         tf_matrix.translation() = Eigen::Vector3f(
-            odom_to_lidar.translation.x,
-            odom_to_lidar.translation.y,
-            odom_to_lidar.translation.z
+            odom_to_footprint.translation.x,
+            odom_to_footprint.translation.y,
+            odom_to_footprint.translation.z
         );
         tf_matrix.rotate(Eigen::Quaternionf(
-            odom_to_lidar.rotation.w,
-            odom_to_lidar.rotation.x,
-            odom_to_lidar.rotation.y,
-            odom_to_lidar.rotation.z
+            odom_to_footprint.rotation.w,
+            odom_to_footprint.rotation.x,
+            odom_to_footprint.rotation.y,
+            odom_to_footprint.rotation.z
         ));
         
         pcl::PointCloud<pcl::PointXYZ> cloud_in_footprint;
