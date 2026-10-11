@@ -1,12 +1,24 @@
 # FAST-LIVO2 → PCL 背景差分 → STVL 时间层 → MeshNav：sim2real 指南
 
-更新：2026-10-10。依据本仓库 `3f0c57a`（「AI实现stvl+清理项目」）及当日读取的源码编写。
+更新：2026-10-11。依据本仓库 `6a45dc4` 及当日读取的源码编写；配套参考包与补丁见 `doc/sim2real_templates/`。
 
 文档位于仓库根目录 `/home/rainple/nav_test`；ROS 2 工作空间为其下的 `mesh_navigation_tutorials`。本文只讨论 MeshNav + MeshController，不涉及其他导航框架。
 
 **目标：先证明建图、定位、障碍感知和底盘接口分别正确，再验证全向导航及“旧路可行就不换路”的行为。换用真机可以排除 Gazebo 渲染、仿真时间和接触模型的影响，但不会自动修复地图、向量场或重规划代码的问题。**
 
-本次更新保留仿真，主线改为当前已接入的 **PCL 背景差分 → TemporalObstacleLayer → 动态膨胀 → final**。RMCL 分割是可选替代输入；FAST-LIVO2 与实车驱动仍需按实际部署版本接入。下文的实车 YAML、launch 均为待创建模板，本次更新只修改本指南。
+主线是 **PCL 背景差分 → TemporalObstacleLayer → 动态膨胀 → final → MeshController → command_gateway → 底盘驱动**。本次提供可暂存构建的独立实车参考包、PCL 补丁、资产校验与无硬件检查工具。仿真源码和参数继续保留；FAST-LIVO2/实际定位与设备驱动按标准接口接入。
+
+**要按步骤动手，先执行第 8 节。** 第 3～7 节供填写地图、外参和实测参数时查阅，第 9～10 节用于实车验收与记录。
+
+| 阶段 | 操作入口 | 完成后留下什么 |
+|---|---|---|
+| 电脑改造 | 8.2～8.3 | 可独立构建、无 Gazebo 依赖的导航包与网关 |
+| 电脑配置 | 8.4～8.5，参照 3～7 | 版本化 bundle、实测参数、标准话题/TF 契约 |
+| 电脑检查 | 8.6、8.12 | 假硬件启动、规划与故障停车的软件证据 |
+| 部署 | 8.9～8.11 | 安装包/源码、地图和配置；实车只接驱动接口 |
+| 车辆验收 | R0～R9 | 真实定位、障碍、制动与导航结果 |
+
+硬件未知项明确保留在接口表里；默认值和模拟输入不会被当作真实车辆测量。
 
 ## 0. 先整理项目，保留可复现的仿真
 
@@ -35,8 +47,9 @@
 停掉仿真与导航后，在项目外建立备份。以下是操作示例，本次文档更新没有执行这些命令：
 
 ```bash
-cd /home/rainple/nav_test
-backup_dir="/home/rainple/nav_test_backup_$(date +%Y%m%d_%H%M%S)"
+export REPO="${REPO:-$HOME/nav_test}"
+cd "$REPO"
+backup_dir="${REPO}_backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$backup_dir"
 git status --short > "$backup_dir/git-status.txt"
 git diff --binary HEAD > "$backup_dir/worktree.patch"
@@ -46,12 +59,12 @@ tar -czf "$backup_dir/source-and-config.tgz" \
   mesh_navigation_tutorials/validation \
   mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_PLAN.md \
   mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_STATUS.md \
-  tools SIM2REAL指南.md
+  tools doc/sim2real_templates SIM2REAL指南.md
 ```
 
 **Git 没有备份所有运行资产。** `.gitignore` 忽略 PCD、H5、STEP、部分 STL、转换产物及 diagnostics。上述源码压缩包也不包含全部 `field/` 和 `third_party/`。另将当前背景 PCD、地图原件、标定、场地 STL、PB 依赖和重要 bag 复制到外盘，并记录 `sha256sum`。`git restore` 无法恢复从未提交的文件。
 
-目前仍有这些待清理项：
+以下是原仿真/历史分支的待清理项，不是第 8 节纯实车闭包的前置条件：
 
 1. `pb_vehicle_adapter/package.xml` 仍声明已移除的 `octo_planner`、`jie_octomap`。移除这两个依赖，并核查 JIE/DDDMR 分支对应的 console entry、源码、配置和测试。`setup.py` 中 `pb_dddmr_map_publisher`、`pb_pcd_publisher` 仍指向当前不存在的模块，应一起整理；保留 `meshnav_navigator` 与仿真入口。
 2. `third_party/build_dddmr_native.sh`、`setup_dddmr_env.sh`、DDDMR 专用 patch 可随历史项目归档。不要运行仍指向不存在工作空间的环境脚本。
@@ -69,7 +82,7 @@ test -s field/pcd/rmuc2026_field.pcd
 
 ### 0.3 仿真与实车配置分开
 
-现有 `mbf_mesh_nav.yaml`、PCL YAML 和 `pb_vehicle_profile.yaml` 继续服务仿真。第 8 节建议在 `mesh_navigation_tutorials/real/` 新建实车配置与入口，实车不覆盖仿真文件。
+现有 `mbf_mesh_nav.yaml`、PCL YAML 和 `pb_vehicle_profile.yaml` 继续服务仿真。第 8 节把独立实车包暂存到 `src/`，使用 `build-real` / `install-real` 和外部场地 bundle；实车配置不覆盖仿真 YAML。
 
 当前仿真总入口 **没有启动 PCL 差分节点**：默认 `obstacle_segmentation: rmcl_seg` 启动的 RMCL 发布 `/obstacle_points`，时间层订阅的却是 `/dynamic_obstacles`。使用本文主链时，应另开终端启动 PCL；若不使用 RMCL 分割，可将仿真配置中的 `meshnav_launch.obstacle_segmentation` 改为 `none`。定位选择 `rmcl_micpl` 时仍需保留 RMCL 定位。一个障碍输入话题只安排一个已验收的来源。
 
@@ -95,17 +108,17 @@ ros2 launch pcl_obstacle_point_subtraction pcl_obstacle_point_subtraction.launch
 |---|---|---|
 | PCD → 可行驶面 PLY | 已有 `field/pcd_to_nav_mesh.py` | 使用真实场地 PCD，按车辆能力重新验收 |
 | MeshNav 网格、静态/动态代价层 | 已有，动态输入使用 `TemporalObstacleLayer` | 切换地图、缓存、车体参数和真实时钟 |
-| PCL 固定背景差分 | 已有，缓存 KD 树、队列深度 1、过滤车体周围点 | 背景配准、QoS、外参及过滤范围需按实车修改 |
+| PCL 固定背景差分 | 已有 KD 树缓存；本次提供可应用的严格输入/背景检查及原点/QoS 补丁 | 按 8.2 应用补丁，再填真实背景与测量值 |
 | STVL 时间衰减 | 已有线性/指数/持久模型与视野加速 | 是 MeshNav 适配实现，未移植整个 STVL，也没有完整自由空间/遮挡判定 |
 | MeshController 全向控制 | 已有，`holonomic: true` | 校验 vx、vy、wz 的方向、单位与底盘能力 |
-| 旧路保留协调节点 | 已有 `meshnav_navigator`，受阻后取消旧执行并停车重试规划 | 可以独立运行；还需验证真实底盘停止与恢复 |
+| 旧路保留协调节点 | 提供独立 `meshnav_runtime` 快照，受阻后取消旧执行并停车重试规划 | 验证真实停止与路径接替 |
 | FAST-LIVO2 驱动、外参、时间同步 | 本次未提供实际部署版本 | 现场确认并冻结配置 |
 | 重启后对旧地图定位 | 本仓库未提供 FAST-LIVO2 的完整接入 | 需要实际定位模块，或经验证的短时初始化方案 |
 | 真机里程计/TF 适配 | 不能用 Gazebo 真值代替 | 由实际里程计、定位节点和标定外参提供 |
-| 真实底盘速度接口与停止机制 | PB 仿真适配器不能代表实车接口 | 对接底盘驱动、速度仲裁、失联停车 |
-| 真机总 launch | 当前没有已验证的专用入口 | 第 8 节提供待落地模板，驱动部分需现场接入 |
+| 真实底盘速度接口与停止机制 | 提供默认禁能的 `command_gateway` 参考实现 | 对接驱动/仲裁与健康心跳，实测驱动独立失联停车 |
+| 真机总 launch | 提供独立 `meshnav_real_bringup`、完整 YAML、bundle 校验及假硬件工具 | 暂存构建后按标准接口接入设备 |
 
-本文是操作与接入指南；文中的真机 YAML、launch 是**需要创建和填写的模板**，本次只交付文档，不会自动改动当前仿真参数，也没有声称已完成实车驱动适配。
+参考包位于文档目录，尚未自动安装到当前活动工作空间。第 8 节给出一次暂存脚本与明确的测量项；标准 ROS 边界之外的驱动协议、定位与标定按实际设备提供。
 
 当前导航配置快照：投影高度 **0.50 m**，静态/动态内圈 **0.15/0.30 m**，动态外圈 **0.60 m**，线速度上限 **0.8 m/s**；PCL 背景匹配阈值 **0.08 m**。动态内圈的旧注释仍提到 0.40 m，与实际数值不符；`obstacle_inflation.inscribed_value: 0.99` 也与 `mesh_planner.cost_limit: 0.99` 相等，不能把它当成留有阈值余量的实车设置。**这些均是当前仿真配置，不是实车推荐参数。** 后续以实际参数回读、测量和路线验收为准。
 
@@ -164,17 +177,19 @@ flowchart TD
 
 ### 2.1 约定导航侧接口
 
-以下名称是本文模板约定，真实驱动通过适配或 remap 接入。
+以下名称是本文模板约定，真实驱动通过适配或 remap 接入。/nav/cmd_vel 是固定的内部导航输出，其余外部接口按 8.7 配置。
 
 | 接口 | 类型 | 约束 |
 |---|---|---|
-| `/cloud` | `sensor_msgs/msg/PointCloud2` | 当前扫描，XYZ 属于配置的 `lidar_frame`；采样时间有效；当前 PCL 输入订阅是 Reliable |
+| `/cloud` | `sensor_msgs/msg/PointCloud2` | 当前扫描，XYZ 属于配置的 `lidar_frame`；采样时间有效；参考实车 PCL 输入订阅 BestEffort，KeepLast(1) |
 | `/dynamic_obstacles` | `sensor_msgs/msg/PointCloud2` | PCL 差分输出，Reliable、队列深度 1；frame 为 `base_footprint`，保留采样时间；正常无障碍也发布有效空帧 |
 | `/obstacle_points` | `sensor_msgs/msg/PointCloud2` | 仅选择 RMCL 分割时使用；需改时序层 topic 或将分割输出 remap 到 `/dynamic_obstacles` |
 | `/odom` | `nav_msgs/msg/Odometry` | 连续里程计，必须提供可信实际速度，不能只有 pose、twist 全为零 |
 | `/tf`、`/tf_static` | TF | `map` 到导航车体参考点、雷达在扫描时间可查询 |
 | `/nav/cmd_vel` | `geometry_msgs/msg/TwistStamped` | 本文实车模板将 MBF `~/cmd_vel` remap 到此处；改话题名不会改变消息类型 |
-| 底盘最终命令话题 | 现场确定 | 若驱动收 Twist，需实际转换节点提取 `twist`，同时校验时效、限幅和失联停车；不能只 remap |
+| `/hardware/cmd_vel` | `geometry_msgs/msg/Twist` | 网关最终输出；驱动/仲裁接此接口，按车体参考点执行并独立检测失联 |
+| `/hardware/ready`、`/hardware/estop`、`/localization/healthy` | `std_msgs/msg/Bool` | 真实设备/定位健康心跳；缺失或过期禁能，详见 8.7 |
+| `/command_gateway/enable`、`/command_gateway/status` | SetBool / String | 显式使能与状态；初始禁能、故障后不自动恢复 |
 | `/rviz/goal_pose` | `geometry_msgs/msg/PoseStamped` | `frame_id: map`，目标落在正确层的网格上 |
 | `/meshnav_navigator/status` | `std_msgs/msg/String` | JSON：状态、执行路径计数、阻断段等 |
 
@@ -330,33 +345,11 @@ field/.step_convert_venv/bin/python field/check_nav_mesh_route.py \
 
 该脚本只预检起终点贴近网格、几何连通及端点边界距离，不能代替整条路线的碰撞验收。
 
-已有 `meshnav_map_test.launch.py` 可以预览 PCD、PLY 和 GetPath，但它会把 MBF 速度映射到 `/cmd_vel`。**预览时不要接通真实底盘订阅；只运行 `meshnav_plan_only`，不要发送 ExePath。** 该入口的地图参数、H5、静态膨胀参数必须显式传入实车值，不能沿用旧场地示例：
+按 8.2～8.5 准备独立实车入口，保持网关禁能，在隔离域通过 GetPath 检查真实网格。8.6 给出了合成场景命令；真实场地替换为已测量的 `start_pose` / `target_pose` 与实际 Z。每条关键路线要求成功结果、非空完整路径、正确楼层和沿途包络余量；不要发送 ExePath 来代替只规划检查。
 
-```bash
-source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
-ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
-  mesh_map_path:=/home/rainple/nav_test/field/real/site01_v1/mesh/site01_nav.ply \
-  mesh_map_working_path:=/home/rainple/nav_test/mesh_navigation_tutorials/site01_v1_preview.h5 \
-  source_pcd_path:=/home/rainple/nav_test/field/real/site01_v1/raw/site01.pcd \
-  publish_source_cloud:=true \
-  static_inscribed_radius:="$R" \
-  static_inflation_radius:="$R_OUTER" \
-  height_diff_threshold:="$STEP_LIMIT"
-```
+原 `meshnav_map_test.launch.py` 属于已有教程/仿真工具，其 MBF 速度会映射到 `/cmd_vel`，不进入本指南纯实车构建闭包。只在已有隔离仿真环境中使用它；不要把其启动依赖和速度映射带入真实底盘。
 
-`R_OUTER >= R`；`STEP_LIMIT` 是结合网格分辨率与车辆台阶能力验收的高度差阈值。这些变量须在对应终端填写，不能使用空字符串。
-
-另一终端运行：
-
-```bash
-ros2 run mesh_navigation_tutorials meshnav_plan_only \
-  --start "$SX" "$SY" "$SZ" --goal "$GX" "$GY" "$GZ"
-```
-
-确认 `PATH_READY`、完整路线、正确楼层，并逐段检查车体余量。测试完成后关闭地图预览服务，避免后续有两个 `/move_base_flex`。
-
-H5 建议放在工作空间根目录，如 `mesh_navigation_tutorials/site01_v1_real.h5`。更换地图或会改变缓存层结果的参数时使用新文件名，或在停机后备份旧缓存再重建。不要加载旧 RMUC 的 H5 来测试真实场地。
+H5 使用 8.5 的可写缓存目录与按地图/参数生成的版本化文件，不加载旧 RMUC 的 H5 测试真实场地。更换地图或参数后验证静态层重新计算。
 
 当前 MeshMap 还提供显式保存层的服务。地图完成计算后，可以在机器人停稳、场地清空、动态障碍已清除的状态下调用，并检查返回的 `success` 和日志；H5 文件存在本身不证明所有层已完整写入：
 
@@ -458,14 +451,14 @@ PCL 识别的是“与背景不一致的点”，不是物体语义分类，也�
 
 | 项目 | 当前实现 | 实车操作 |
 |---|---|---|
-| 点云输入坐标 | 按配置 `lidar_frame` 计算变换；代码只检查 header 非空 | XYZ 必须真正位于该帧，header 与配置一致；不能仅改名字或 remap 世界系云 |
+| 点云输入坐标 | 原源码只检查 header 非空；补丁严格核对配置 lidar_frame、时间与 little-endian FLOAT32 XYZ 布局 | XYZ 必须真正位于该帧；不能仅改名字或 remap 世界系云 |
 | 背景比较坐标 | 参数叫 `odom_frame`，实际可指定 `map`；加载 PCD 时只赋 frame 名 | 将背景 PCD 实际配准到 map，再设置 `odom_frame: map`，保证扫描时刻 TF 可查 |
-| Gazebo 原点修正 | C++ 仍硬编码雷达局部 Z **+0.03 m** | 修改为可配置偏移，仿真保持原值，实车按测量原点外参设值；TF 已描述真实测量原点时通常为零。此项尚未实现，仅改 YAML 无法去掉硬编码 |
-| QoS | 输入、输出均 Reliable，KeepLast(1) | BestEffort 驱动需适配发布 Reliable `/cloud`，或修改并验证 PCL 订阅 QoS；只改时间层 qos 无效 |
-| PCD 加载 | 失败只报错，空背景随后把整帧当障碍 | 启动前检查路径和非零加载点数；后续代码应在背景加载失败时拒绝进入工作状态 |
+| Gazebo 原点修正 | 原源码硬编码 Z +0.03 m；8.2 补丁提供 `sensor_offset_xyz`，默认保留仿真值 | 真机由 robot.yaml 明确填零或实测偏移；TF 已描述测量原点时通常为零；必须应用补丁后再使用新参数 |
+| QoS | 补丁可选 Reliable / BestEffort 输入；输出 Reliable、KeepLast(1) | 实车入口按 cloud_qos 同时配置 PCL 与网关，默认 BestEffort；核对真实驱动 |
+| PCD 加载 | 原源码加载失败仍继续；补丁在缺失/空/非有限背景时抛错，拒绝启动 | 检查日志点数、哈希及实际配准，不能只改 PCD 的 frame 名 |
 | 匹配阈值 | `distance_threshold: 0.08`，内部平方后传给 PCL | 填实际距离，结合静态定位/地图误差与最小待检障碍测量；调大也可能抹去贴墙新障碍 |
 | 自身过滤 | `robot_radius: 0.4`，base 系 XY 圆柱内的点全部删除 | 按实车包络验收；它也会删掉该圆柱内的外部障碍，不是完整 URDF 自滤波 |
-| TF 发布 | `need_odom_tf`、`need_static_tf` 当前均 false | 里程计/URDF 已提供对应 TF 时保持 false；避免重复发布 |
+| TF 发布 | 实车入口不启动 cloud_tf_publisher | TF 完全由 8.7 的里程计、定位与外参所有者提供 |
 
 **PCL 的点坐标修正和时间层的 `sensor_offset_xyz` 是两处不同设置。** 前者影响背景匹配和障碍坐标，后者影响时间层的测量原点、距离和视锥。TF、两处设置和点云坐标必须采用同一原点约定；只把时间层偏移改成零，不会取消 PCL 中的 +0.03 m。
 
@@ -572,7 +565,7 @@ PCL 的 `distance_threshold` 是与背景最近邻的距离容差，不是世界
 | `obstacle_keep_time` | 取决于遮挡绕行时长和移走后允许的残留时间；10 s 是当前仿真值 |
 | `decay_acceleration` | 首测 0；正值在视锥内累计 `a*t³/6` 加速，可能提前清除被遮挡侧面，需单独验证 |
 | `max_observation_age` | 当前 0.30 s；依据延迟测量设定，先处理积压和时间同步 |
-| `sensor_frame` / `sensor_offset_xyz` | 真实测量原点约定；同时处理 PCL 的硬编码修正 |
+| `sensor_frame` / `sensor_offset_xyz` | 真实测量原点约定；同时应用 PCL 参数化修正补丁 |
 | 范围与水平/垂直 FOV | 使用真实雷达有效覆盖并包含姿态；当前仿真的 360°、-7°～52°不可盲抄 |
 | `localization_reference_frame` | 使用连续 `odom` 参考，检测 map←odom 修正跳变 |
 | 位姿跳变阈值 | 当前 0.75 m、45°、短间隔 0.20 s；按真实运动与定位修正幅度验证 |
@@ -585,266 +578,515 @@ PCL 的 `distance_threshold` 是与背景最近邻的距离容差，不是世界
 
 2026-10-09 的原箱体场景修复后有一轮成功到达，但行驶约 **39.8 m、重规划 5 次**。这是有限场景验证，尚不能证明所有复杂场景的路线效率或稳定性；实车前继续保留同场景回归。记录见 [实施状态](mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_STATUS.md) 与 `mesh_navigation_tutorials/validation/stvl_box_20261009/`。
 
-## 8. 真机配置与启动模板
+## 8. 在电脑上完成改造，再部署标准接口
 
-### 8.1 不复用仿真总入口
+本节是执行主线。第 3～7 节解释地图、定位与参数的依据；本节把它们落实为文件、命令和通过条件。随仓库提供的 [参考文件](doc/sim2real_templates/README.md) 位于 `doc/sim2real_templates/`，不会被当前仿真工作空间自动安装。按照 8.2 暂存后，才产生可构建的实车包。
 
-不要把 `meshnav_pb_sim.launch.py` 直接作为真机入口。它还会涉及 Gazebo 资源、真值适配、PB 速度来源切换及仿真 preflight；`start_sim=False` 也不是完整真机模式。`pb_preflight` 当前检查 `/clock` 和仿真速度适配器，`pb_nav_goal` 也强制启用仿真时钟，不能直接用作实车验收/发目标工具。实车使用 Mesh Goal 或发布符合接口的 PoseStamped，并核查协调节点状态。
-
-通用 `mbf_mesh_navigation_server_launch.py` 当前只支持地图与 H5 路径覆盖，固定读取仿真 YAML，**没有 `params_file` 参数**。下面直接创建 MBF Node、先加载基础配置再加载实车覆盖，避免虚构已有实车入口。
-
-保留原仿真配置，建议现场创建：
+### 8.1 最终目录与工作分工
 
 ```text
-mesh_navigation_tutorials/real/
-  meshnav_real.yaml
-  pcl_real.yaml
-  meshnav_real.launch.py
+nav_test/                                      # 源码仓库；机器人上的仓库名可不同
+├── doc/sim2real_templates/                     # 本指南配套参考实现
+│   ├── tools/stage_reference.py                # 检查并暂存两个包及 PCL 补丁
+│   ├── patches/pcl_real_interfaces.patch
+│   ├── meshnav_runtime/                        # 协调节点 + 显式使能的命令网关
+│   └── meshnav_real_bringup/                   # 配置校验、纯导航启动、假硬件检查
+└── mesh_navigation_tutorials/
+    ├── src/meshnav_runtime/                    # 执行暂存后产生
+    ├── src/meshnav_real_bringup/                # 执行暂存后产生
+    ├── build-real/                             # 与原仿真 build 分开
+    └── install-real/                           # 普通安装，不依赖源码软链接
+
+~/meshnav_bundles/site01_v1/                     # 场地资产包，独立于源码与安装
+├── robot.yaml                                 # 实测车体、坐标、雷达、限制及资产校验值
+├── meshnav_real.yaml                           # 完整 MBF / 地图 / 代价 / 控制配置
+├── pcl_real.yaml                               # PCL 输入与背景差分配置
+├── interfaces_real.yaml                        # 话题、QoS、网关超时、协调节点配置
+├── maps/site_nav.ply
+├── maps/site_background.pcd
+└── evidence/                                  # 标定、数据、接口表、验收记录
+
+~/.ros/meshnav/cache/                           # 可写 H5，按地图与配置版本生成
 ```
 
-### 8.2 配置模板
+电脑上完成：暂存改造、依赖审查、编译、填测量表、准备地图、校验资产包、隔离假硬件检查、软件故障停车检查、保存版本及部署包。实际驱动位于导航包之外，通过 8.7 的接口接入；驱动启动命令按实际雷达、定位和底盘填写到 `evidence/hardware_commands.md`。
 
-先完成第 6.1 节的 PCL 原点修正/QoS 接入并重新构建，再使用这些模板进行无电机检查。下列 `__...__` 必须替换为现场数值或真实帧名。路径示例指向第 4 节生成的地图。
-原 YAML 作为基础配置，后加载此文件覆盖真机差异；每项参数的最终值以 ROS 回读为准。
-数值占位符替换后填写浮点数（例如 `1.0`），不要留下字符串；此模板未填写前不可用于启动。
+“只剩接口”是指实车接入时无需再修改规划器、时间层或导航 launch。真实外参、定位质量和刹车能力仍须有测量依据；电脑上的假硬件通过不会替你测出这些值。已知的车体尺寸、外参和真实 bag 可以在电脑上提前完成填写与回放验收。
 
-```yaml
-move_base_flex:
-  ros__parameters:
-    use_sim_time: false
-    global_frame: map
-    robot_frame: base_footprint
-    odom_topic: /odom
-    planners: [mesh_planner]
-    controllers: [mesh_controller]
-    planner_frequency: 2.0
-    controller_frequency: 20.0
-    path_check_step: 0.025
-    path_check_max_distance: 0.4  # 首先核对导航参考点，之后按投影误差验收。
-    mesh_planner:
-      cost_limit: 0.99
-      step_width: 0.10
-    mesh_controller:
-      type: mesh_controller/MeshController
-      holonomic: true
-      max_lin_velocity: 0.15     # 首测限速，还需底盘侧限制加速度与失联停车。
-      max_ang_velocity: 0.20
-    mesh_map:
-      mesh_file: /home/rainple/nav_test/field/real/site01_v1/mesh/site01_nav.ply
-      mesh_working_file: /home/rainple/nav_test/mesh_navigation_tutorials/site01_v1_real.h5
-      default_layer: final
-      height_diff:
-        threshold: __实测验收的高度差阈值m__
-      static_inflation:
-        inscribed_radius: __静态硬间距m__
-        inflation_radius: __静态软代价外圈m__
-        inscribed_value: 1.0
-      obstacle:
-        type: mesh_layers/TemporalObstacleLayer
-        topic: /dynamic_obstacles
-        qos: Reliable           # 当前 PCL 差分输出为 Reliable。
-        tf_tolerance: 0.10
-        robot_height: __多视角测试确定的投影高度m__
-        max_obstacle_dist: __实测有效障碍检测距离m__
-        axis_frame: map         # 前提：map 的 Z 与重力方向对齐。
-        down_axis: [0.0, 0.0, -1.0]
-        history_voxel_size: 0.05
-        clearing_mode: stvl
-        decay_model: 0
-        obstacle_keep_time: __实测确定的障碍保留时间s__
-        decay_acceleration: 0.0
-        max_observation_age: 0.30
-        sensor_frame: __真实雷达帧名__
-        # 本模板假定 TF 已描述真实测量原点；PCL 硬编码修正需另外处理。
-        sensor_offset_xyz: [0.0, 0.0, 0.0]
-        min_sensor_range: __雷达有效近距m__
-        horizontal_fov_deg: __实测水平视野deg__
-        vertical_fov_min_deg: __实测垂直视野下限deg__
-        vertical_fov_max_deg: __实测垂直视野上限deg__
-        localization_reference_frame: odom
-        pose_jump_translation: 0.75
-        pose_jump_rotation_deg: 45.0
-        pose_jump_max_interval: 0.20
-      obstacle_inflation:
-        inscribed_radius: __动态硬间距m__
-        inflation_radius: __动态软代价外圈m__
-        inscribed_value: 1.0
+### 8.2 备份与暂存改造
 
-meshnav_navigator:
-  ros__parameters:
-    use_sim_time: false
-    goal_topic: /rviz/goal_pose
-    planner: mesh_planner
-    controller: mesh_controller
-    planner_frequency: 2.0       # 独立节点，需要显式设置，和上方保持一致。
-    get_path_action: /move_base_flex/get_path
-    exe_path_action: /move_base_flex/exe_path
-    check_path_service: /move_base_flex/check_path_cost
-    pose_timeout: 2.0           # 协调节点反馈超时，不等于传感器安全超时。
-    path_progress_window: 2.0
-    action_timeout: 15.0
-    replan_patience: 15.0        # 受阻起的总等待时限，含取消等待，按墙钟计。
-    replan_retry_period: 0.5
-
-rviz2_meshnav_real:
-  ros__parameters:
-    use_sim_time: false
-```
-
-控制器增益等未列项仍继承基础 YAML；因此还需审查基础文件的完整参数，不能只检查这段覆盖。不要同时再加载另一份包含同名参数的未知覆盖文件。
-
-另存 `real/pcl_real.yaml`；这是完整的 PCL 参数文件，不同时加载含 `use_sim_time: true` 的仿真 PCL YAML。这里假定里程计和真实 URDF 已提供 TF：
-
-```yaml
-/**:
-  ros__parameters:
-    use_sim_time: false
-    base_frame: base_footprint
-    lidar_frame: __真实雷达帧名__
-
-obstacle_sub:
-  ros__parameters:
-    input_cloud_topic: /cloud
-    output_cloud_topic: /dynamic_obstacles
-    pcd_file_path: /home/rainple/nav_test/field/real/site01_v1/raw/site01_background_map.pcd
-    odom_frame: map             # 该 PCD 的 XYZ 已实际配准到 map。
-    distance_threshold: __实测背景匹配容差m__
-    robot_radius: __实测自身点过滤半径m__
-
-cloud_tf_publisher:
-  ros__parameters:
-    odom_topic: /odom
-    need_odom_tf: false
-    need_static_tf: false
-    # 两个开关关闭时不广播以下外参；仍要满足节点必填参数类型。
-    # 若将来开启静态 TF，先填写标定值并去掉其他同边发布者。
-    lidar_xyz: [0.0, 0.0, 0.0]
-    lidar_rpy: [0.0, 0.0, 0.0]
-```
-
-`site01_background_map.pcd` 是另外整理并配准的固定背景；只复制为这个文件名不会完成配准。确认它、导航 PLY、定位地图和在线 TF 属于同一 map。真实底盘不支持 vy 时将 `holonomic` 设 false，并重新验证受限运动学与路径执行。
-
-### 8.3 简单 launch 模板
-
-保存为 `real/meshnav_real.launch.py`。此入口只启动导航、PCL 和 RViz；FAST-LIVO2、定位适配、真实 URDF、硬件驱动及速度看门狗由现场部署提供。模板尚未创建、占位符未填写或第 6.1 节待修改项未处理时，不能把它当作已验收的实车入口。
-
-```python
-import os
-
-from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription
-from launch_ros.actions import Node
-
-
-def generate_launch_description():
-    mesh_share = get_package_share_directory('mesh_navigation_tutorials')
-    pb_share = get_package_share_directory('pb_vehicle_adapter')
-    base_yaml = os.path.join(mesh_share, 'config', 'mbf_mesh_nav.yaml')
-    real_yaml = os.path.join(os.path.dirname(__file__), 'meshnav_real.yaml')
-    pcl_yaml = os.path.join(os.path.dirname(__file__), 'pcl_real.yaml')
-
-    return LaunchDescription([
-        Node(
-            package='mbf_mesh_nav', executable='mbf_mesh_nav',
-            name='move_base_flex', output='screen',
-            parameters=[base_yaml, real_yaml],
-            remappings=[('/move_base_flex/cmd_vel', '/nav/cmd_vel')],
-        ),
-        Node(
-            package='pcl_obstacle_point_subtraction',
-            executable='pcl_obstacle_point_subtraction',
-            name='obstacle_sub', output='screen', parameters=[pcl_yaml],
-        ),
-        Node(
-            package='pcl_obstacle_point_subtraction', executable='cloud_tf_publisher',
-            name='cloud_tf_publisher', output='screen', parameters=[pcl_yaml],
-        ),
-        Node(
-            package='pb_vehicle_adapter', executable='meshnav_navigator',
-            name='meshnav_navigator', output='screen',
-            parameters=[base_yaml, real_yaml],
-        ),
-        Node(
-            package='rviz2', executable='rviz2', name='rviz2_meshnav_real',
-            output='screen', parameters=[real_yaml],
-            arguments=['-d', os.path.join(pb_share, 'rviz', 'pb_meshnav.rviz')],
-        ),
-    ])
-```
-
-使用 PB 包中的协调节点不代表需要使用 PB 的仿真底盘。RViz 配置可作为起点，真机外观和 TF 应加载真实 URDF，不使用仿真车辆尺寸作碰撞依据。
-
-### 8.4 构建与逐终端启动
-
-先整理第 0.2 节失效的依赖和 entry point。已有完整工作空间时，可在新终端只加载 ROS underlay 后，构建目标包及其工作空间依赖：
+以下按电脑仓库 `~/nav_test` 演示；机器人仓库则是 `~/nav_test_fix`。`REPO` 指包含本指南的仓库根目录，`WS` 指其下的 **mesh_navigation_tutorials**，注意复数和两个层级。每个操作终端先设置：
 
 ```bash
-source /opt/ros/humble/setup.bash
-cd /home/rainple/nav_test/mesh_navigation_tutorials
-colcon build --symlink-install \
-  --packages-up-to pb_vehicle_adapter pcl_obstacle_point_subtraction
-source install/setup.bash
-ros2 pkg executables mbf_mesh_nav
-ros2 pkg executables pb_vehicle_adapter
-ros2 pkg executables pcl_obstacle_point_subtraction
-ros2 launch pcl_obstacle_point_subtraction pcl_obstacle_point_subtraction.launch.py --show-args
+export REPO="$HOME/nav_test"
+export WS="$REPO/mesh_navigation_tutorials"
+export BUNDLE="$HOME/meshnav_bundles/site01_v1"
+cd "$REPO"
+test -f SIM2REAL指南.md
+test -d "$WS/src"
+git status --short
 ```
 
-选择 RMCL 分割或定位时，再把 `rmcl_ros` 加入 `--packages-up-to` 并检查其 executables。首次更新过 `AbstractLayer` 虚析构的旧构建目录还需重编译 `mesh_map` 及全部下游，见 [STVL 实施状态](mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_STATUS.md)，不能只替换新层的 `.so`。
+先按 0.2 保存源码、未提交修改与地图资产。将下列改造放在专用分支：
 
-全新上位机从源码构建并安装实际依赖，不能直接复制旧机器的 build/install。`source_dependencies.yaml` 中上游分支名也不能代替当前已修改源码的版本锁定；保留本仓库 commit 和实际源码。当前 PB/教程包仍带仿真依赖，保留仿真阶段先保留这些包；后续若要做纯实车安装，再拆出共享协调节点和运行依赖。
+```bash
+git switch -c sim2real/site01
+python3 doc/sim2real_templates/tools/stage_reference.py --repo "$REPO"
+```
 
-**重建后先回归仿真，再接实车。** 不因指南模板语法通过就跳过第 6.1 节的代码适配、接口检查与 R0～R4。需要清理工作空间缓存时，停机、保存地图/记录，在新终端仅加载 ROS，然后将工作空间自己的 build/install/log 一起归档再重建；不要触碰 PB 插件的第三方 build。
+预检查应显示两个目标包路径和 `Preflight passed`，不会写入文件。若补丁不匹配当前 PCL 源码，先对照版本合并差异；脚本也会拒绝覆盖已经存在的实车包。检查通过后执行：
 
-每个 ROS 2 终端加载同一环境、同一 ROS_DOMAIN_ID 和已验证的 RMW 配置。按顺序启动：
+```bash
+python3 doc/sim2real_templates/tools/stage_reference.py --repo "$REPO" --apply
+git diff --stat
+git diff -- mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp
+```
 
-| 终端 | 启动内容 | 在继续前确认 |
+本步骤的具体结果：
+
+| 文件 / 包 | 改好后的行为 |
+|---|---|
+| `src/meshnav_runtime` | 独立运行旧路检查协调节点与速度网关；不依赖 PB、Gazebo、RMCL 或 MPPI |
+| `src/meshnav_real_bringup` | 读取完整实车配置与外部资产包；校验后仅启动 MBF、PCL、协调节点、网关；默认不启动 RViz |
+| PCL C++ 源码 | 可配置测量原点偏移和输入 QoS；严格检查帧、采样时间与 FLOAT32 XYZ 布局；背景缺失/空/非有限时启动失败；安全发布合法零点差分云，处理后复查年龄 |
+| PCL 仿真原点修正 | 默认仍保留 `[0,0,0.03]`；实车配置明确设 `[0,0,0]` 或已测值 |
+| 原 PB 启动与仿真 YAML | 不作为实车入口；继续用于 0.3 的回归 |
+
+参考协调节点是当前 PB 协调实现的独立快照；以后修改协调逻辑时，应同步审阅两个版本及测试。这里没有添加真实雷达驱动、FAST-LIVO2 重定位器或底盘协议。
+
+### 8.3 仅安装并构建实车依赖，最多三个包同时编译
+
+新开干净终端，只加载 Humble。若当前 shell 已 source 原仿真 overlay，可用下面的 shell 清除继承的前缀，再重新设置 `REPO`、`WS`：
+
+```bash
+env -u AMENT_PREFIX_PATH -u CMAKE_PREFIX_PATH -u COLCON_PREFIX_PATH \
+    -u PYTHONPATH -u LD_LIBRARY_PATH -u CC -u CXX \
+    bash --noprofile --norc
+source /opt/ros/humble/setup.bash
+export REPO="$HOME/nav_test"
+export WS="$REPO/mesh_navigation_tutorials"
+cd "$WS"
+sudo apt-get check
+dpkg --audit
+```
+
+APT 检查成功、`dpkg --audit` 无未完成配置后再装依赖。此前机器人 Ignition 包冲突属于系统依赖问题，应先修复；本节不需要继续安装 Gazebo。
+
+```bash
+colcon list --base-paths src --packages-up-to meshnav_real_bringup --names-only
+mapfile -t REAL_PACKAGE_PATHS < <(
+  colcon list --base-paths src --packages-up-to meshnav_real_bringup --paths-only
+)
+test "${#REAL_PACKAGE_PATHS[@]}" -gt 0
+rosdep install --from-paths "${REAL_PACKAGE_PATHS[@]}" --ignore-src \
+  --rosdistro humble \
+  --dependency-types build --dependency-types buildtool \
+  --dependency-types build_export --dependency-types buildtool_export \
+  --dependency-types exec --simulate
+```
+
+审阅模拟安装结果后，将最后的 `--simulate` 去掉执行。此构建闭包应包含导航核心、LVR2、PCL 和两个实车包，不应出现 `pb_vehicle_adapter`、`pb_gazebo_sim_support`、`mesh_navigation_tutorials_sim`、`ros_gz_sim`、`rmagine`、`rmcl` 或 `mesh_mppi`。不要对整个 `src` 跑 rosdep，也不要在实车主线执行无选择的 `colcon build`。
+
+这条 MeshController 主线使用 C++17，Ubuntu 22.04 的 GCC 11 即可；GCC 13 是 MPPI 分支的独立需求。LVR2 可使用系统 Embree 3；这里不构建默认下载 Embree 4.4 的 rmagine。若 LVR2 报缺 GSL/GLUT/Embree，按实际错误检查 `libgsl-dev`、`freeglut3-dev`、`libembree-dev`，并确认 CMake 的 `embree_DIR`，避免人为把 Embree 3 的库改名成 `libembree.so`。
+
+用户级配置位置是 **`~/.colcon/defaults.yaml`**，内容例如：
+
+```yaml
+build:
+  executor: parallel
+  parallel-workers: 3
+```
+
+`COLCON_DEFAULTS_FILE` 若设置，会覆盖默认文件位置。三个包不等于三个编译进程，因此本次构建同时限制单包 Make 并行度为 2：
+
+```bash
+export CMAKE_BUILD_PARALLEL_LEVEL=2
+export MAKEFLAGS='-j2'
+colcon build --base-paths src --packages-up-to meshnav_real_bringup \
+  --executor parallel --parallel-workers 3 \
+  --build-base build-real --install-base install-real \
+  --cmake-args \
+    -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+    -DLVR2_BUILD_TOOLS=OFF -DLVR2_WITH_CUDA=OFF \
+    -DLVR2_WITH_OPENCL=OFF -DLVR2_WITH_3DTILES=OFF
+source install-real/local_setup.bash
+ros2 pkg executables meshnav_runtime
+ros2 pkg executables meshnav_real_bringup
+```
+
+应能看到 `command_gateway`、`meshnav_navigator`、`meshnav_validate_bundle`、`meshnav_make_smoke_bundle`、`meshnav_fake_hardware`。这里使用新的普通安装目录，不加 `--symlink-install`，因此不会碰到旧 ament Python 目录改软链接的冲突。使用 CMake 3.22 无需 `CMAKE_POLICY_VERSION_MINIMUM`。若要变更编译器，换新 build/install 目录，避免混用旧缓存。
+
+### 8.4 创建实车资产包，只填写一个实测参数入口
+
+```bash
+export BUNDLE="$HOME/meshnav_bundles/site01_v1"
+mkdir -p "$BUNDLE/maps" "$BUNDLE/evidence"
+cp "$WS/src/meshnav_real_bringup/config/"*.yaml "$BUNDLE/"
+```
+
+首次创建时执行以上复制；已有配置不要重复覆盖。按第 3～4 节准备并复制经过验收的两个文件：
+
+```bash
+cp "$REPO/field/real/site01_v1/mesh/site01_nav.ply" "$BUNDLE/maps/site_nav.ply"
+cp "$REPO/field/real/site01_v1/raw/site01_background_map.pcd" "$BUNDLE/maps/site_background.pcd"
+sha256sum "$BUNDLE/maps/site_nav.ply" "$BUNDLE/maps/site_background.pcd"
+```
+
+路径对应第 4 节的转换产物。缺文件时先完成转换，不以仿真场地地图或空文件顶替真实场地。
+
+打开 `robot.yaml`，逐项填写；模板保留 `null` 是为了阻止未知尺寸静默变成仿真参数：
+
+| 配置项 | 填写方法与依据 |
+|---|---|
+| `deployment_kind` | 实车为 `hardware`；电脑工具另生成 `desktop_smoke`，不能改成 hardware 后当真地图部署 |
+| `robot.length_m / width_m / height_m` | 含附件和突出物的实际包络，单位 m |
+| `robot.collision_radius_m` | 导航参考点到最远碰撞点的实测距离；居中矩形至少为 `hypot(L,W)/2` |
+| `robot.safety_margin_m` | 地图、定位、感知与执行误差分配的余量，记录依据 |
+| `robot.height_diff_threshold_m` | 在线 HeightDiffLayer 的实测可接受网格高度差；另核查坡度与台阶，不能直接照抄 0.1 |
+| `robot.holonomic` | 底盘确认支持 vy 才填 true；不支持则填写 false 并重新验收控制行为 |
+| `frames.map / odom / base / lidar` | 四个不同帧；与 8.7 的 TF 所有权表一致 |
+| `sensors.offset_xyz` | lidar link → 测量原点的额外偏移；TF 已表示原点时为零，不再重复加外参 |
+| `sensors.min_range_m / max_range_m`、FOV | 实际有效覆盖，包含安装遮挡；垂直角严格位于 (-90°,90°)，不能直接照抄仿真雷达 |
+| `perception.distance_threshold_m` | 固定背景匹配误差与最小待检障碍联合测定 |
+| `perception.self_filter_radius_m` | 会删除 base 系圆柱内所有点；需验证近车外部障碍不被抹去 |
+| `perception.obstacle_projection_height_m` | 根据真实各向障碍回波高度验收，见 7.2 |
+| `perception.obstacle_keep_time_s` | 遮挡保持和移走后残留允许时间；首轮关闭加速，见 7.4 |
+| `perception.max_observation_age_s / max_future_s` | 观测年龄由三处共用；未来容差供 PCL/网关使用，必须在 (0,0.001] s，时间层固定为 1 ms；网关对应值由此派生 |
+| `perception.static_inflation_radius_m / dynamic_inflation_radius_m` | 软膨胀半径至少覆盖 collision radius + margin |
+| `motion.*` | 初始低速上限及加速度；同时覆盖 MeshController 与最终网关，不只改一处 |
+| `map.mesh_file / background_file` | 资产包内相对路径；PLY 和背景 PCD 都已在 map 中 |
+| `map.version / mesh_sha256 / background_sha256` | 场地版本与上一步实际 SHA256；资产变化后重新验收 |
+| `integration.*_verified` | 完成对应验证并在 evidence 留记录后设 true；手动改布尔值本身不构成验证 |
+
+`robot.yaml` 是测量值的唯一入口。启动器把同一个包络、偏移、帧、速度、年龄预算填入各节点；PCL 的参数名虽叫 `odom_frame`，实车有效值固定取 `frames.map`。连续里程计仍使用独立 `frames.odom`。
+
+`interfaces_real.yaml` 负责真实话题名、QoS 和超时，按 8.7 的契约修改。`meshnav_real.yaml` 还包含固定控制增益、目标容差、静态代价、旧路检查与定位跳变阈值，需要逐项审阅与验收；资产校验只检查一致性，不替代性能测试。已有配置中的 0.4 m 路径投影容差也须结合地形高度核查。
+
+保存 `evidence/interfaces.md`、`tf_owners.md`、`hardware_commands.md`、`calibration.md`、`acceptance.md`，记录测量日期、来源、实际命令和未确认项。地图/背景、外参、配置和代码 commit 一起冻结。
+
+### 8.5 启动前校验与电脑自动检查
+
+```bash
+ros2 run meshnav_real_bringup meshnav_validate_bundle \
+  --bundle-dir "$BUNDLE" --cache-dir "$HOME/.ros/meshnav/cache" --dump-effective \
+  > "$BUNDLE/evidence/effective-parameters.txt"
+```
+
+通过条件：退出码 0；输出地图与背景的实际路径、可写缓存路径、最终 Twist 话题，以及网关默认禁能提示。未填测量值、未完成集成记录、错误哈希、缺失地图、错误时钟、接口冲突会拒绝启动。校验会创建并移除缓存目录内的小型可写探针，**不启动电机或导航进程**；地图头检查不等于完整网格拓扑验收，还需 8.6 实际加载与 GetPath。
+
+H5 从零生成在 `cache_dir`，文件名包含场地版本、PLY 哈希和有效导航参数哈希。部署后配置或路径变化可能生成新缓存，这是预期行为；不要复用仿真 H5，也不要把 H5 写到只读安装目录。
+
+检查参考代码：
+
+```bash
+python3 -m compileall -q "$WS/src/meshnav_runtime" "$WS/src/meshnav_real_bringup"
+PYTHONPATH="$WS/src/meshnav_runtime:$WS/src/meshnav_real_bringup:$PYTHONPATH" \
+  python3 -m pytest -q "$WS/src/meshnav_runtime/test" "$WS/src/meshnav_real_bringup/test"
+```
+
+测试涵盖协调状态和网关故障边界、资产配置拒绝条件。安装 `python3-pytest` 后执行；前面 `BUILD_TESTING=OFF` 只关闭构建时的测试和通用 lint，不会禁止这里的显式测试。
+
+### 8.6 无硬件启动与规划检查
+
+另建电脑专用资产包。所有检查终端必须使用同一个隔离域，并只在本机通信；每个终端先 source Humble 与 `install-real/local_setup.bash`，再设置：
+
+```bash
+export ROS_DOMAIN_ID=209
+export ROS_LOCALHOST_ONLY=1
+export SMOKE_BUNDLE="$HOME/meshnav_bundles/desktop_smoke"
+```
+
+确保 209 没有其他运行中的测试系统。下面的假硬件只发布静止里程计、TF、扫描与健康输入，不发目标、使能请求或底盘速度：
+
+```bash
+# 终端 A，首次生成，不覆盖已有文件。
+ros2 run meshnav_real_bringup meshnav_make_smoke_bundle --output "$SMOKE_BUNDLE"
+ros2 run meshnav_real_bringup meshnav_validate_bundle --bundle-dir "$SMOKE_BUNDLE"
+ros2 run meshnav_real_bringup meshnav_fake_hardware --bundle "$SMOKE_BUNDLE" --domain-id 209
+```
+
+```bash
+# 终端 B，只启动导航侧四个节点。
+ros2 launch meshnav_real_bringup meshnav_real.launch.py \
+  bundle_dir:="$SMOKE_BUNDLE" cache_dir:="$HOME/.ros/meshnav/smoke_cache"
+```
+
+```bash
+# 终端 C，检查关键节点与输出。
+ros2 node list
+ros2 param get /move_base_flex use_sim_time
+ros2 param get /obstacle_sub sensor_offset_xyz
+ros2 topic echo /dynamic_obstacles --once --field header
+ros2 topic echo /command_gateway/status --once
+ros2 topic echo /meshnav_smoke/chassis_cmd --once
+```
+
+应看到 `/move_base_flex`、`/obstacle_sub`、`/meshnav_navigator`、`/command_gateway` 和假硬件节点；不出现 Gazebo、PB 真值或 `/clock`。网关 `enabled` 为 false，最终测试 Twist 为零；健康数据齐全后 `ready` 可为 true，表示允许申请使能，不表示已使能。
+
+只规划，不执行路径：
+
+```bash
+ros2 action send_goal /move_base_flex/get_path mbf_msgs/action/GetPath \
+  '{use_start_pose: true, start_pose: {header: {frame_id: map}, pose: {position: {x: -1.0, y: -1.0, z: 0.0}, orientation: {w: 1.0}}}, target_pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 1.0, z: 0.0}, orientation: {w: 1.0}}}, tolerance: 0.0, planner: mesh_planner}'
+```
+
+要求 `outcome: 0`、路径非空、路径终点到目标且在 z=0 平面。这个 8 m 方形合成场景只检查安装、插件、地图加载、TF、差分空帧和规划连通；它不模拟车辆运动或真实场地。真实 PLY 还需按 4.3、R4 检查关键路线；若给协调节点发目标，静止假里程计不能提供闭环到达证明。
+
+在该隔离域和 `/meshnav_smoke/` 输出下再做软件停车检查。确认状态 ready=true、enabled=false 后，另开终端 D 持续发送带新 stamp 的小速度；这只驱动测试话题，不发导航目标：
+
+```bash
+# 终端 D，同样 source 两层环境并设置域 209 / localhost。
+ros2 topic pub -r 20 /nav/cmd_vel geometry_msgs/msg/TwistStamped \
+  '{header: {stamp: now, frame_id: base_footprint}, twist: {linear: {x: 0.05}, angular: {z: 0.0}}}'
+```
+
+```bash
+# 终端 C，输入已齐全、指令源已开始后再显式使能。
+ros2 service call /command_gateway/enable std_srvs/srv/SetBool '{data: true}'
+ros2 topic echo /meshnav_smoke/chassis_cmd
+```
+
+要求测试 Twist 在加速度限制下变为非零、且不超过配置限幅。分别检查：
+
+1. Ctrl+C 停止终端 D 的指令源，指令超时 0.25 s 后归零并禁能。
+2. 重启指令源后再次显式使能，再 Ctrl+C 停止终端 A 假硬件；按观测年龄或数据/健康超时归零并禁能。重新启动假硬件后仍不自动恢复。
+3. 检查 `/command_gateway/status` 中 enabled=false 与实际故障原因，保存结果。最后禁能并停止指令源。
+
+真实运行的恢复步骤是取消旧目标、确认条件恢复、显式重新使能、发送新目标；不能把持续测试指令留在真实域。完整网关边界由 8.5 的测试检查。
+
+**不要在真实底盘域发布模拟健康状态或测试速度。** 假硬件 bundle 必须保持 `desktop_smoke` 和 `/meshnav_smoke/chassis_cmd`；工具拒绝拿实车 bundle 伪装输入。测试结束关闭三个终端，实车终端重新设置真实 ROS_DOMAIN_ID 与网络配置。
+
+### 8.7 实车外部接口契约
+
+把真实驱动或一个独立的 `robot_io` 适配层接到下表。话题都可在 `interfaces_real.yaml` 改名，帧在 `robot.yaml` 改；同一份有效参数由启动器送给所有消费者。适配层只做坐标、消息、时基和健康接口整理，不承载规划逻辑。
+
+| 接线端 | 标准接口 | 必须满足 | 建议起始频率 / QoS |
+|---|---|---|---|
+| 雷达 → 导航 | `/cloud`，PointCloud2 | 当前去畸变单次扫描，little-endian FLOAT32 XYZ，实际坐标为 lidar_frame；保留采样时间，不送累计云 | 10 Hz 量级；BestEffort、KeepLast(1) |
+| 里程计 → 导航 | `/odom`，Odometry | header=odom，child=base；pose 在 odom，twist 在 child；来自实测运动 | 20 Hz 或更高；Reliable |
+| 定位 → 导航 | `map→odom` TF | 对已冻结旧地图定位，6DoF，能在观测时刻查询；不能恒为单位矩阵掩盖未定位 | 随定位更新；TF 默认 QoS |
+| 里程计 → 导航 | `odom→base_footprint` TF | 连续 6DoF 位姿；和 /odom 同一参考点、同一时刻 | 随里程计更新 |
+| 外参 → 导航 | `base_footprint→base_link→lidar_link` TF | 实测安装外参；静态结构由 URDF/静态发布者提供 | tf_static |
+| 底盘/仲裁 → 网关 | `/hardware/ready`，Bool | 已连通、驱动允许接收导航、仲裁选择导航且反馈有效时才 true | 心跳 10 Hz、Reliable |
+| 急停监控 → 网关 | `/hardware/estop`，Bool | true=急停有效，false=已确认解除；缺失/过期不能视为解除 | 心跳 10 Hz、Reliable |
+| 定位健康 → 网关 | `/localization/healthy`，Bool | 已在正确 map 初始化且质量、时效、跳变合格；丢失或大跳变先 false | 心跳 10 Hz、Reliable |
+| 网关 → 底盘/仲裁 | `/hardware/cmd_vel`，Twist | 车体 x前、y左、z上；m/s 与 rad/s；驱动只从明确的最终仲裁者取速度 | 网关 20 Hz、Reliable |
+
+Bool 没有 header，网关按接收心跳的墙钟新鲜度判断；发布者必须反映真实状态，不能永久发布 true 或将驱动“进程存在”当作设备健康。底盘驱动还必须有自己的命令超时停车：网关被杀死、通信中断时，ROS 无法保证最后一条零速度送达 MCU。
+
+每条 TF 边只安排一个发布者：`map→odom` 属于定位；`odom→base` 属于实际里程计或同一个状态估计器；安装外参属于 URDF/静态 TF。专用实车 launch **不启动 `cloud_tf_publisher`**，不生成这些外部 TF；按 5.1/5.2 保留真实 Z 与姿态，不能在坡道/多层场地强行归零。
+
+接口适配的判断与处理：
+
+| 实际驱动情况 | 电脑上需要改好什么 |
+|---|---|
+| 点云已经是正确 PointCloud2、雷达坐标、采样时间 | remap / 配置话题即可，不再平移或重写 stamp |
+| Livox CustomMsg，或去畸变输出位于世界/IMU系 | 在驱动适配包转换成真实雷达系 PointCloud2；用对应观测时刻的 TF，检查回波原点约定 |
+| Odometry 的 child 是 IMU / 雷达 / 非导航参考点 | 变换 pose，并旋转 twist、补偿杆臂；不是只改 child_frame_id。同系杆臂关系 `v_base = v_sensor + ω × r_sensor_to_base` |
+| 驱动只提供连续 SLAM，没有重启对旧图定位 | 补齐真实定位模块和初始化；不在导航 launch 中猜一个 FAST-LIVO2 重定位入口 |
+| 底盘收 TwistStamped | 用独立驱动适配器从最终网关 Twist 转换；按驱动需要填帧和发送时间，保留驱动看门狗 |
+| 底盘收 CAN / 串口 / Ackermann 消息 | 独立驱动按真实运动学与协议转换；若不支持全向，不忽略 vy 假装全向 |
+| 已有遥控/导航仲裁器 | 网关输出接仲裁器的导航输入；硬件最终命令保持一个发布者；ready 反映实际来源选择 |
+
+模板提供标准 ROS 接口，不能凭未知 CAN ID、串口包格式或底盘类型自动产生真实驱动。把这些协议留在 `robot_io` 包，可使 MeshNav 在换车时继续使用同一套接口。
+
+### 8.8 网关行为与超时表
+
+导航链路固定为：
+
+```text
+MeshController /nav/cmd_vel (TwistStamped)
+ → command_gateway：时间/帧/健康检查 + 使能 + 速度/加速度限制
+ → /hardware/cmd_vel (Twist)
+ → 实车驱动或已有仲裁器
+ → MCU 自身的超时/急停机制
+```
+
+| 项目 | 参考值与行为 |
+|---|---|
+| 默认状态 | 启动即禁能，周期发布零；配置没有自动使能开关 |
+| `/command_gateway/enable`，SetBool | 所有健康输入有效才接受 true；使能前缓存的旧指令不能执行，仍需使能后的新指令 |
+| 指令超时 | 0.25 s；指令有有限 vx/vy/wz、base 帧和有效 stamp，否则禁能并归零 |
+| 数据接收超时 | odom、原始扫描、差分扫描各 0.50 s，按单调墙钟计时 |
+| 测量年龄 | odom / cloud / obstacles ≤0.30 s；未来超出 1 ms 拒绝。处理延迟不通过重写时间戳掩盖 |
+| 健康心跳超时 | ready、estop、localization healthy 各 0.50 s；缺失也不能使能 |
+| TF 检查 | 在最近有效 odom 时刻检查 map→odom→base 的有限变换；TF 有效性记录/测量的时效上限 0.50 s，查询失败即禁能；雷达链错误使 PCL 无有效输出并触发数据超时 |
+| 故障恢复 | 急停、失效/超时/时钟倒退锁住禁能；数据恢复不自动恢复运动，需要显式再使能 |
+| 停止 | 源零指令、禁能或故障直接归零，停止不等待加速度斜坡；非零指令才按实测加速度上限渐变 |
+| 参数变化 | 网关参数拒绝在线修改，改文件后重启，重新检查并使能 |
+
+网关不评估 FAST-LIVO2 匹配质量、不检测每个点的物理可用性，也不提供自主定位跳变判别。真实定位健康源负责报告失效/跳变，PCL 拒绝不可用扫描。TemporalObstacleLayer 的历史复位不能代替停车信号。
+
+### 8.9 在电脑上制作部署件
+
+先保存可重现的版本信息：
+
+```bash
+mkdir -p "$BUNDLE/evidence"
+git -C "$REPO" rev-parse HEAD > "$BUNDLE/evidence/project_commit.txt"
+git -C "$REPO" diff --binary HEAD > "$BUNDLE/evidence/worktree.patch"
+colcon list --base-paths "$WS/src" --packages-up-to meshnav_real_bringup --names-only \
+  > "$BUNDLE/evidence/runtime-packages.txt"
+```
+
+确认新实车包与补丁已纳入自己的 Git 提交，记录的 commit 才能复现；Git 忽略的地图和标定资产通过独立 bundle 携带。`.gitignore` 下的原始 PCD/H5 不会随着 `git pull` 自动到车上。
+
+可选择两条部署方式：
+
+| 方式 | 电脑完成什么 | 车辆要求 |
 |---|---|---|
-| A | 真正的雷达、IMU、相机驱动 | 频率、时间戳、字段、QoS |
-| B | 现场 FAST-LIVO2 启动命令 | 初始化稳定，里程计有效 |
-| C | 旧地图定位、TF/里程计/点云适配 | map 对齐；`/cloud`、`/odom` 符合本文接口 |
-| D | 底盘驱动、命令仲裁和看门狗 | 保持禁能或手动模式，不自动接受导航 |
-| E | 以下导航 launch（含 PCL） | 固定背景非零、节点/地图/参数正确、动态代价正常 |
-| F | 记录 bag 和诊断信息 | 记录开始后再使能低速测试 |
+| 同环境普通安装包 | 在与车相同的 Ubuntu 22.04 / amd64 / Humble / 系统依赖与 CPU 指令基线上构建，只传 install + bundle | 对齐系统依赖，保留编译时安装前缀，启动检查通过；车辆不编译 |
+| 源码 + bundle | 电脑完成暂存、配置与所有可执行检查；传冻结源码和 bundle | 车辆只按 8.3 编译实车闭包，最多三个包；不重做导航改造 |
 
-A～D 的可执行命令取决于尚未提供的真机驱动和 FAST-LIVO2 版本，必须在现场运行记录中补齐。E 在模板已创建、占位符已填写后运行：
+若目标是直接部署二进制，应提前统一安装前缀，例如 **`/opt/meshnav/releases/site01_v1`**。在目标同环境的电脑/构建容器中使用新的 build 目录，并把 8.3 的 `--install-base install-real` 替换为这个固定前缀。前缀应在构建环境可写，目标上仍安装到相同路径。不要把普通安装包跨 Ubuntu/ROS/架构复制后假定能用；也不要把原 `--symlink-install` 的 install 目录单独打包。
+
+构建环境准备好这个全新、可写前缀后，新开干净终端只 source Humble，设置 REPO/WS，并从工作空间执行完整发布构建：
 
 ```bash
-source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
-ros2 launch /home/rainple/nav_test/mesh_navigation_tutorials/real/meshnav_real.launch.py
+export RELEASE_PREFIX=/opt/meshnav/releases/site01_v1
+cd "$WS"
+export CMAKE_BUILD_PARALLEL_LEVEL=2
+export MAKEFLAGS='-j2'
+colcon build --base-paths src --packages-up-to meshnav_real_bringup \
+  --executor parallel --parallel-workers 3 \
+  --build-base build-release-site01-v1 --install-base "$RELEASE_PREFIX" \
+  --cmake-args \
+    -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+    -DLVR2_BUILD_TOOLS=OFF -DLVR2_WITH_CUDA=OFF \
+    -DLVR2_WITH_OPENCL=OFF -DLVR2_WITH_3DTILES=OFF
+source "$RELEASE_PREFIX/local_setup.bash"
 ```
 
-参数和连接核验：
+固定前缀普通安装完成并通过 8.5～8.6 后：
+
+```bash
+export RELEASE_PREFIX=/opt/meshnav/releases/site01_v1
+export DEPLOY_OUT="$HOME/meshnav_deploy/site01_v1"
+mkdir -p "$DEPLOY_OUT"
+tar -czf "$DEPLOY_OUT/runtime.tgz" -C "$RELEASE_PREFIX" .
+tar -czf "$DEPLOY_OUT/bundle.tgz" -C "$BUNDLE" .
+cd "$DEPLOY_OUT"
+sha256sum runtime.tgz bundle.tgz > SHA256SUMS
+```
+
+将部署件和系统依赖清单复制到车上；资产包不要包含 desktop_smoke。运行时使用 `source /opt/ros/humble/setup.bash` 再 `source "$RELEASE_PREFIX/local_setup.bash"`，避免 `setup.bash` 隐式加载电脑原 overlay 的前缀链。安装脚本、Python shebang 和 ELF 库仍需目标验证；实际启动还会发现 `ldd` 未覆盖的插件加载问题。
+
+### 8.10 机器人安装与静止接口验收
+
+以收到 `~/meshnav_deploy/site01_v1` 为例，先保持驱动禁能：
+
+```bash
+cd "$HOME/meshnav_deploy/site01_v1"
+sha256sum -c SHA256SUMS
+export RELEASE_PREFIX=/opt/meshnav/releases/site01_v1
+sudo mkdir -p "$RELEASE_PREFIX"
+sudo tar -xzf runtime.tgz -C "$RELEASE_PREFIX"
+export BUNDLE="$HOME/meshnav_bundles/site01_v1"
+mkdir -p "$BUNDLE"
+tar -xzf bundle.tgz -C "$BUNDLE"
+source /opt/ros/humble/setup.bash
+source "$RELEASE_PREFIX/local_setup.bash"
+ros2 pkg prefix meshnav_real_bringup
+ros2 run meshnav_real_bringup meshnav_validate_bundle --bundle-dir "$BUNDLE"
+```
+
+目录存在时先确认对应版本，不把不同版本覆盖到同一 release。如果采用源码部署，车上设置 `REPO="$HOME/nav_test_fix"`，执行已暂存版本的 8.3；后续用 `$WS/install-real/local_setup.bash`。
+
+检查依赖库，并保留输出：
+
+```bash
+python3 - <<'PY'
+import os
+from pathlib import Path
+import subprocess
+root = Path(os.environ['RELEASE_PREFIX'])
+failed = False
+for path in root.rglob('*'):
+    if not path.is_file():
+        continue
+    with path.open('rb') as stream:
+        elf = stream.read(4) == b'\x7fELF'
+    if elf:
+        result = subprocess.run(['ldd', str(path)], capture_output=True, text=True)
+        if 'not found' in result.stdout or 'not found' in result.stderr:
+            print(path, result.stdout, result.stderr)
+            failed = True
+raise SystemExit(1 if failed else 0)
+PY
+```
+
+然后按已填写的 `hardware_commands.md` 启动真实雷达、里程计、定位、TF/外参与底盘驱动。不要执行 PB 仿真总入口。各终端设置真实 ROS_DOMAIN_ID，分布式机器统一时钟；同机硬件可继续 localhost，不同机器则按网络拓扑配置。
+
+```bash
+ros2 topic info /cloud -v
+ros2 topic echo /cloud --once --field header
+ros2 topic echo /odom --once
+ros2 run tf2_ros tf2_echo map odom
+ros2 run tf2_ros tf2_echo odom base_footprint
+ros2 run tf2_ros tf2_echo base_footprint lidar_link
+ros2 topic echo /hardware/ready --once
+ros2 topic echo /hardware/estop --once
+ros2 topic echo /localization/healthy --once
+```
+
+帧名/话题名若改过，命令也用实际值。TF echo 是连通检查，扫描时刻可查询性还要从 PCL 日志和差分年龄验证。对照 8.7 检查消息类型、所有权、时间、方向和真实速度；有任一项不满足就留在禁能状态并修驱动适配层。
+
+### 8.11 接入导航、使能与恢复
+
+```bash
+ros2 launch meshnav_real_bringup meshnav_real.launch.py \
+  bundle_dir:="$BUNDLE" cache_dir:="$HOME/.ros/meshnav/cache" start_rviz:=false
+```
+
+默认只启动四个导航侧节点。需要 RViz 时先独立安装 `rviz2` 与本仓库 `rviz_mesh_tools_plugins`，再设置 `start_rviz:=true`；它们不进入默认无界面部署闭包。实车保持 `use_sim_time: false`，没有 /clock 来源也应能正常运行。
 
 ```bash
 ros2 param get /move_base_flex use_sim_time
-ros2 param get /meshnav_navigator use_sim_time
 ros2 param get /obstacle_sub use_sim_time
-ros2 param get /cloud_tf_publisher use_sim_time
-ros2 param get /move_base_flex mesh_map.mesh_file
-ros2 param get /move_base_flex mesh_map.mesh_working_file
-ros2 param get /move_base_flex mesh_map.obstacle.robot_height
-ros2 param get /move_base_flex mesh_map.obstacle.type
-ros2 param get /move_base_flex mesh_map.obstacle.topic
-ros2 param get /move_base_flex mesh_map.obstacle.clearing_mode
-ros2 param get /move_base_flex mesh_map.obstacle.obstacle_keep_time
-ros2 param get /move_base_flex mesh_map.obstacle.sensor_frame
-ros2 param get /move_base_flex mesh_map.obstacle.sensor_offset_xyz
-ros2 param get /obstacle_sub pcd_file_path
+ros2 param get /command_gateway use_sim_time
 ros2 param get /obstacle_sub odom_frame
-ros2 param get /obstacle_sub lidar_frame
-ros2 param get /meshnav_navigator planner_frequency
-ros2 param get /meshnav_navigator replan_patience
-ros2 param get /meshnav_navigator replan_retry_period
-ros2 topic info /cloud -v
-ros2 topic info /dynamic_obstacles -v
-ros2 topic info /nav/cmd_vel -v
-ros2 service list
-ros2 action list -t
+ros2 param get /obstacle_sub sensor_offset_xyz
+ros2 topic echo /command_gateway/status --once
+ros2 topic info /hardware/cmd_vel -v
 ```
 
-真机这些节点和定位/驱动/RViz 都应为 `use_sim_time: false`，不需要伪造 `/clock`。`/nav/cmd_vel` 应显示 TwistStamped，订阅者应是经过接口验收的速度仲裁/底盘适配节点；若底盘收 Twist，另外核对转换输出。默认模板使用 PB RViz，可先作为显示起点；将点云显示 topic 改成 `/dynamic_obstacles`，RobotModel 接到真实 robot_description，不能沿用 PB 仿真外观当车体尺寸依据。
+确认所有 use_sim_time 为 false，PCL 背景比较帧为 map，偏移正确，网关 enabled=false，最终速度为零；核查速度发布者只有预定的网关/最终仲裁关系。完成 R0～R4 且操作区域就绪后，先取消遗留目标，再申请导航使能：
+
+```bash
+ros2 service call /meshnav_navigator/cancel std_srvs/srv/Trigger '{}'
+ros2 service call /command_gateway/enable std_srvs/srv/SetBool '{data: true}'
+```
+
+应返回成功并等待新指令。然后按 9.1 发送新目标，做 R5 低速闭环。只看 enable 服务返回成功不能证明底盘已经收到指令或车辆已安全运动。
+
+主动停止：
+
+```bash
+ros2 service call /command_gateway/enable std_srvs/srv/SetBool '{data: false}'
+ros2 service call /meshnav_navigator/cancel std_srvs/srv/Trigger '{}'
+```
+
+故障恢复顺序固定为：解除故障并检查实测反馈 → 保持网关禁能、取消旧目标 → 重新确认 health/TF/点云/代价与定位 → 显式使能 → 发送新目标。不要仅重启传感器就继续旧目标。
+
+### 8.12 电脑阶段完成的定义
+
+将此表保存到 `evidence/acceptance.md`，每项写命令、实际输出与日期：
+
+| 项目 | 通过条件 |
+|---|---|
+| 文件改造 | 两个独立实车包已暂存，PCL 补丁已应用并可编译，仿真基线仍可用 |
+| 构建 | 实车闭包无 Gazebo/PB/RMAGINE/MPPI；最多三个包并行，普通安装无源码软链接依赖 |
+| 配置 | 测量值与接口表齐全；真实资产哈希、坐标、版本可追踪；校验有效参数与预期一致 |
+| 软件测试 | 协调、网关、资产校验测试通过；缺失、错误和过期数据不能使能或续跑 |
+| 无硬件启动 | 四个节点及插件正常加载；有效空差分、规划成功；测试输出始终受网关控制 |
+| 故障恢复 | 断流/急停软件检查归零并锁禁能，恢复数据不自动运动 |
+| 部署件 | commit、补丁、依赖、配置、地图资产与 checksums 齐全；目标同环境/前缀明确 |
+| 留给车辆的边界 | 每个驱动命令、话题、TF 发布者、健康判据、底盘失联停止责任写清楚 |
+
+完成后，实车调试从 8.10 的标准接口检查进入 R0～R9，不再在车上重新设计导航包。尚未获得的硬件信息列在接口表里；这些缺项要由实际驱动和测量补齐，不能通过填模板默认值消除。
+
 
 ## 9. 从静止到封堵隧道的测试顺序
 
@@ -867,7 +1109,7 @@ R8 应使用可移动软障碍，记录其摆放时间和位置，避免人员�
 
 ### 9.1 发送目标与停止
 
-使用模板 RViz 中的 **Mesh Goal**，目标落在正确层的可行驶面；不要用直接调用 GetPath→ExePath 的旧面板验证重规划，因为它绕过协调节点。
+使用可选实车 RViz 中的 **Mesh Goal**，目标落在正确层的可行驶面；不要用直接调用 GetPath→ExePath 的旧面板验证重规划，因为它绕过协调节点。
 
 ```bash
 ros2 topic echo /meshnav_navigator/status
@@ -907,21 +1149,19 @@ ros2 service call /meshnav_navigator/cancel std_srvs/srv/Trigger '{}'
 建议每轮单独目录：
 
 ```bash
-cd /home/rainple/nav_test/mesh_navigation_tutorials
-REAL_RUN_DIR="$PWD/diagnostics/real_site01/$(date +%Y%m%d_%H%M%S)_R5"
+REAL_RUN_DIR="$HOME/meshnav_runs/site01/$(date +%Y%m%d_%H%M%S)_R5"
 mkdir -p "$REAL_RUN_DIR"
 export REAL_RUN_DIR
 ros2 param dump /move_base_flex > "$REAL_RUN_DIR/move_base_flex.yaml"
 ros2 param dump /meshnav_navigator > "$REAL_RUN_DIR/navigator.yaml"
 ros2 param dump /obstacle_sub > "$REAL_RUN_DIR/obstacle_sub.yaml"
-ros2 param dump /cloud_tf_publisher > "$REAL_RUN_DIR/cloud_tf_publisher.yaml"
+ros2 param dump /command_gateway > "$REAL_RUN_DIR/command_gateway.yaml"
 ros2 node list > "$REAL_RUN_DIR/nodes.txt"
 ros2 topic list -t > "$REAL_RUN_DIR/topics.txt"
-git rev-parse HEAD > "$REAL_RUN_DIR/project_commit.txt"
-sha256sum /home/rainple/nav_test/field/real/site01_v1/mesh/site01_nav.ply \
-  > "$REAL_RUN_DIR/map_sha256.txt"
-sha256sum /home/rainple/nav_test/field/real/site01_v1/raw/site01_background_map.pcd \
-  > "$REAL_RUN_DIR/background_sha256.txt"
+cp "$BUNDLE/evidence/project_commit.txt" "$REAL_RUN_DIR/"
+cp "$BUNDLE/"*.yaml "$REAL_RUN_DIR/"
+sha256sum "$BUNDLE/maps/site_nav.ply" > "$REAL_RUN_DIR/map_sha256.txt"
+sha256sum "$BUNDLE/maps/site_background.pcd" > "$REAL_RUN_DIR/background_sha256.txt"
 ```
 
 ROS 2 bag 基础记录示例：
@@ -929,7 +1169,9 @@ ROS 2 bag 基础记录示例：
 ```bash
 ros2 bag record --include-hidden-topics -o "$REAL_RUN_DIR/bag" \
   /tf /tf_static /odom /cloud /dynamic_obstacles \
-  /nav/cmd_vel /rviz/goal_pose /meshnav_navigator/status \
+  /nav/cmd_vel /hardware/cmd_vel /hardware/ready /hardware/estop \
+  /localization/healthy /command_gateway/status \
+  /rviz/goal_pose /meshnav_navigator/status \
   /move_base_flex/mesh /move_base_flex/path \
   /move_base_flex/vertex_costs /move_base_flex/vertex_costs/updates \
   /move_base_flex/get_path/_action/status \
@@ -972,7 +1214,7 @@ ros2 bag record --include-hidden-topics -o "$REAL_RUN_DIR/bag" \
 | 控制器没有速度，向量场访问失败 | 当前 face、向量场有效范围、旧/新执行的日志 | 控制器/规划衔接 |
 | 机器人进入 waiting_for_path | outcome、当前起点/目标是否受阻、剩余重试时限 | 停车重规划等待，不是仍沿旧路行驶 |
 | 有导航速度但实车不走或横移方向错 | 仲裁、驱动使能、单位、vy 支持、里程计 | 底盘接入 |
-| 雷达/定位掉线后继续运动 | 独立新鲜度看门狗、底盘命令失联停车 | 尚未补齐的实车保护 |
+| 雷达/定位掉线后继续运动 | command_gateway/status、实际命令发布者、健康心跳与驱动独立失联停车 | 网关或驱动接入错误 |
 
 已有长路线测试出现过 MeshController 在当前 face 取不到向量场并返回失败；旧路保留修复并没有同时修复这个问题。真实场地若出现同样日志，应保留现场的 pose、path、mesh、final 和向量场，不能仅归因于 FAST-LIVO2 或实车参数。
 
@@ -980,7 +1222,7 @@ ros2 bag record --include-hidden-topics -o "$REAL_RUN_DIR/bag" \
 
 第一轮先完成 R0～R5，然后提交：
 
-1. 本文 1.1 的信息表，以及实际 A～D 启动命令。
+1. 本文 1.1 与 8.7 的接口表，以及 evidence/hardware_commands.md 中的真实启动命令。
 2. FAST-LIVO2 原始 bag、PCD、标定配置和地图变换矩阵。
 3. PLY、转换报告、关键通道尺寸、无电机 GetPath 结果。
 4. TF 拓扑、各关键话题类型/QoS、完整运行时参数。
@@ -990,6 +1232,13 @@ ros2 bag record --include-hidden-topics -o "$REAL_RUN_DIR/bag" \
 这些数据通过后再做 R6～R9。这样若真机仍卡死或换路异常，可以明确追踪到定位、感知、代价、规划、控制或底盘中的具体环节。
 
 ## 13. 本地依据
+
+- [实车参考文件与执行入口](doc/sim2real_templates/README.md)
+- [一次暂存脚本](doc/sim2real_templates/tools/stage_reference.py)
+- [PCL 实车接口补丁](doc/sim2real_templates/patches/pcl_real_interfaces.patch)
+- [独立启动与 bundle 校验说明](doc/sim2real_templates/meshnav_real_bringup/README.md)
+- [独立协调节点](doc/sim2real_templates/meshnav_runtime/meshnav_runtime/meshnav_navigator.py)
+- [命令网关](doc/sim2real_templates/meshnav_runtime/meshnav_runtime/command_gateway.py)
 
 - [点云转换流程及限制](field/README.md)
 - [PCD 转换器](field/pcd_to_nav_mesh.py)

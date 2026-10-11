@@ -1,0 +1,221 @@
+--- a/mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp
++++ b/mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp
+@@ -16,6 +16,12 @@
+ #include <pcl/search/kdtree.h>
+ 
+ #include <Eigen/Geometry>
++#include <pcl/common/point_tests.h>
++#include <pcl/filters/filter.h>
++#include <cmath>
++#include <cstdint>
++#include <stdexcept>
++#include <vector>
+ 
+ class ObstacleSubNode : public rclcpp::Node {
+ private:
+@@ -33,6 +39,45 @@
+     std::string base_frame_;
+     std::string lidar_frame_;
+     std::string odom_frame_;
++    std::vector<double> sensor_offset_xyz_;
++    std::string input_qos_;
++    double max_cloud_age_s_;
++    double max_future_s_;
++
++    bool fresh(const sensor_msgs::msg::PointCloud2& msg) {
++        if (msg.header.stamp.sec < 0 ||
++            (msg.header.stamp.sec == 0 && msg.header.stamp.nanosec == 0) ||
++            msg.header.stamp.nanosec >= 1000000000u) return false;
++        const auto stamp = rclcpp::Time(msg.header.stamp, get_clock()->get_clock_type());
++        const double age = (now() - stamp).seconds();
++        return age >= -max_future_s_ && age <= max_cloud_age_s_;
++    }
++
++    bool validTransform(const geometry_msgs::msg::Transform& transform) {
++        const auto& t = transform.translation;
++        const auto& q = transform.rotation;
++        const double norm2 = q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w;
++        return std::isfinite(t.x) && std::isfinite(t.y) && std::isfinite(t.z) &&
++            std::isfinite(norm2) && std::abs(norm2 - 1.0) <= 0.01;
++    }
++
++    bool validLayout(const sensor_msgs::msg::PointCloud2& msg) {
++        if (msg.is_bigendian || msg.height == 0 || msg.point_step == 0 ||
++            uint64_t(msg.row_step) < uint64_t(msg.width) * msg.point_step ||
++            uint64_t(msg.data.size()) < uint64_t(msg.height) * msg.row_step) return false;
++        for (const auto* name : {"x", "y", "z"}) {
++            size_t found = 0;
++            for (const auto& field : msg.fields) {
++                if (field.name != name) continue;
++                if (field.datatype != sensor_msgs::msg::PointField::FLOAT32 ||
++                    field.count != 1 || uint64_t(field.offset) + 4 > msg.point_step)
++                    return false;
++                ++found;
++            }
++            if (found != 1) return false;
++        }
++        return true;
++    }
+ 
+     // 全局静态点云
+     pcl::PointCloud<pcl::PointXYZ>::Ptr static_cloud_;
+@@ -62,17 +107,39 @@
+         lidar_frame_ = this->declare_parameter<std::string>("lidar_frame");
+         odom_frame_ = this->declare_parameter<std::string>("odom_frame");
+         robot_radius_ = this->declare_parameter<double>("robot_radius");
++        // Preserve the existing simulation correction; hardware supplies zero
++        // when lidar_frame already names the physical measurement origin.
++        sensor_offset_xyz_ = declare_parameter<std::vector<double>>(
++            "sensor_offset_xyz", std::vector<double>{0.0, 0.0, 0.03});
++        input_qos_ = declare_parameter<std::string>("input_qos", "Reliable");
++        max_cloud_age_s_ = declare_parameter<double>("max_cloud_age_s", 0.30);
++        max_future_s_ = declare_parameter<double>("max_future_s", 0.001);
++        if (!std::isfinite(distance_threshold_) || distance_threshold_ <= 0 ||
++            !std::isfinite(robot_radius_) || robot_radius_ < 0 ||
++            !std::isfinite(max_cloud_age_s_) || max_cloud_age_s_ <= 0 ||
++            !std::isfinite(max_future_s_) || max_future_s_ < 0 ||
++            sensor_offset_xyz_.size() != 3 ||
++            (input_qos_ != "Reliable" && input_qos_ != "BestEffort") ||
++            static_pcd_file_.empty() || input_topic_.empty() || output_topic_.empty() ||
++            base_frame_.empty() || lidar_frame_.empty() || odom_frame_.empty())
++            throw std::runtime_error("Invalid obstacle_sub parameters");
++        for (const auto offset : sensor_offset_xyz_)
++            if (!std::isfinite(offset)) throw std::runtime_error("Invalid sensor offset");
+ 
+         this->tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+         this->tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
+ 
+         // 加载静态点云
+         static_cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
+-        if (pcl::io::loadPCDFile<pcl::PointXYZ>(static_pcd_file_, *static_cloud_) == -1) {
+-            RCLCPP_ERROR(this->get_logger(), "无法读取文件 %s", static_pcd_file_.c_str());
+-        }
+-
+-        // 当前仿真 PCD 的坐标与 odom 重合；这里只标记坐标系，不再次平移地图。
++        if (pcl::io::loadPCDFile<pcl::PointXYZ>(static_pcd_file_, *static_cloud_) < 0 ||
++            static_cloud_->empty())
++            throw std::runtime_error("Cannot load a nonempty background PCD: " + static_pcd_file_);
++        for (const auto& point : *static_cloud_)
++            if (!pcl::isFinite(point))
++                throw std::runtime_error("Background PCD contains nonfinite XYZ");
++
++        // The background is already expressed in odom_frame_ (map for real use).
++        // Assigning its name does not register or transform the PCD.
+         static_cloud_->header.frame_id = odom_frame_;
+         RCLCPP_INFO(this->get_logger(), "Loaded background point cloud with %zu points.", static_cast<size_t>(static_cloud_->size()));
+ 
+@@ -81,8 +148,10 @@
+         current_cloud_odom_pcl_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
+ 
+         // 只排队最新扫描；保留采样时间，避免积压点云被下游新鲜度检查拒收。
++        auto input_qos = rclcpp::QoS(rclcpp::KeepLast(1));
++        if (input_qos_ == "BestEffort") input_qos.best_effort();
+         cloud_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+-            input_topic_, rclcpp::QoS(rclcpp::KeepLast(1)),
++            input_topic_, input_qos,
+             std::bind(&ObstacleSubNode::inputCloudCallback, this, std::placeholders::_1)
+         );
+ 
+@@ -98,8 +167,9 @@
+     // 处理输入的点云
+     void inputCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+ 
+-        if (msg->header.frame_id.empty()) {
+-            RCLCPP_WARN(this->get_logger(), "跳过点云: header.frame_id 为空!");
++        if (msg->header.frame_id != lidar_frame_ || !fresh(*msg) || !validLayout(*msg)) {
++            RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
++                "Rejected cloud: frame, stamp, age or FLOAT32 XYZ layout");
+             return;
+         }
+ 
+@@ -118,6 +188,9 @@
+             return;
+         }
+ 
++        if (!validTransform(odom_to_footprint_.transform) ||
++            !validTransform(footprint_to_lidar_.transform)) return;
++
+         // 计算odom->lidar
+         tf2::Transform T_odom_footprint;
+         tf2::Transform T_footprint_lidar;
+@@ -126,11 +199,11 @@
+         tf2::fromMsg(footprint_to_lidar_.transform, T_footprint_lidar);
+         tf2::Transform T_odom_lidar = (T_footprint_lidar * T_odom_footprint).inverse();
+ 
+-        // --- gazebo发布的tf与点云中心存在偏差,这里直接强制纠正,后面需要去除 ---
+-        // Gazebo 测量原点相对雷达 link，沿局部 Z 轴偏移 +0.03 m。
++        // Configurable link -> measurement origin correction.
+         tf2::Transform T_lidar_sensor;
+         T_lidar_sensor.setIdentity();
+-        T_lidar_sensor.setOrigin(tf2::Vector3(0.0, 0.0, 0.03));
++        T_lidar_sensor.setOrigin(tf2::Vector3(
++            sensor_offset_xyz_[0], sensor_offset_xyz_[1], sensor_offset_xyz_[2]));
+         // 将测量原点的偏移合入点云到 odom 的变换。
+         T_odom_lidar = T_odom_lidar * T_lidar_sensor;
+         // ----------------------------------------------------------------------
+@@ -141,17 +214,25 @@
+         lidar_to_odom_.transform = tf2::toMsg(T_odom_lidar);
+ 
+         // 将点云从“sensor”也就是点云中心变换到odom
+-        tf2::doTransform(*msg, current_cloud_odom_, lidar_to_odom_);
+-
+-        // 将 odom 坐标系下的当前单帧点云转为 PCL。
+-        pcl::fromROSMsg(current_cloud_odom_, *current_cloud_odom_pcl_);
+-
+-        // 与 SegmentDifferences 相同的最近邻差分；阈值仍为距离平方。
+-        if (static_cloud_->empty())
+-            *obstacle_cloud_ = *current_cloud_odom_pcl_;
+-        else
+-            pcl::getPointCloudDifference(*current_cloud_odom_pcl_,
+-                distance_threshold_ * distance_threshold_, background_tree_, *obstacle_cloud_);
++        if (msg->width == 0) {
++            current_cloud_odom_pcl_->clear();
++        } else {
++            tf2::doTransform(*msg, current_cloud_odom_, lidar_to_odom_);
++            pcl::fromROSMsg(current_cloud_odom_, *current_cloud_odom_pcl_);
++        }
++
++        // Remove invalid range returns; a nonempty scan with no finite XYZ is
++        // corrupt/unusable and must not masquerade as an empty observation.
++        current_cloud_odom_pcl_->is_dense = false;
++        std::vector<int> finite_indices;
++        const bool had_points = !current_cloud_odom_pcl_->empty();
++        pcl::removeNaNFromPointCloud(*current_cloud_odom_pcl_,
++            *current_cloud_odom_pcl_, finite_indices);
++        if (had_points && current_cloud_odom_pcl_->empty()) return;
++        // Same distance-squared threshold as SegmentDifferences; no fallback
++        // turns a failed background load into a full obstacle observation.
++        pcl::getPointCloudDifference(*current_cloud_odom_pcl_,
++            distance_threshold_ * distance_threshold_, background_tree_, *obstacle_cloud_);
+ 
+         // ----------------------- 变回车体系 -----------------------------------
+         // 这里不是原路返回了，而是直接将点云从odom变到footprint
+@@ -172,7 +253,10 @@
+         ));
+         
+         pcl::PointCloud<pcl::PointXYZ> cloud_in_footprint;
+-        pcl::transformPointCloud(*obstacle_cloud_, cloud_in_footprint, tf_matrix);
++        // PCL 1.12 transformPointCloud's copy path divides by cloud.width;
++        // the perfectly normal zero-difference cloud has width == 0.
++        if (!obstacle_cloud_->empty())
++            pcl::transformPointCloud(*obstacle_cloud_, cloud_in_footprint, tf_matrix);
+         // ----------------------------------------------------------------------
+ 
+         // 滤除车体自身的点云
+@@ -185,10 +269,16 @@
+             }
+         }
+ 
++        // Preserve a valid XYZ layout and height even for zero-point output.
++        filtered_obstacle_cloud.width = static_cast<uint32_t>(filtered_obstacle_cloud.size());
++        filtered_obstacle_cloud.height = 1;
++        filtered_obstacle_cloud.is_dense = true;
+         sensor_msgs::msg::PointCloud2 obstacle_msg;
+         pcl::toROSMsg(filtered_obstacle_cloud, obstacle_msg);
+         obstacle_msg.header = msg->header; // 保留原单帧点云的采样时间
+         obstacle_msg.header.frame_id = base_frame_;
++        // TF lookup and PCL processing may consume the age budget.
++        if (!fresh(*msg)) return;
+         dynamic_obstacles_publisher_->publish(obstacle_msg);
+     }
+ };

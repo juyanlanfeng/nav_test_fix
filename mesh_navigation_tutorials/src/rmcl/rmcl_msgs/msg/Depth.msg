@@ -1,2 +1,0 @@
-DepthInfo info
-RangeData data

@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>meshnav_real_bringup</name>
+  <version>0.1.0</version>
+  <description>Standalone MeshNav real robot bringup with validated external bundles.</description>
+  <maintainer email="maintainers@example.invalid">nav_test maintainers</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>meshnav_runtime</exec_depend>
+  <exec_depend>mbf_mesh_nav</exec_depend>
+  <exec_depend>cvp_mesh_planner</exec_depend>
+  <exec_depend>mesh_controller</exec_depend>
+  <exec_depend>mesh_layers</exec_depend>
+  <exec_depend>pcl_obstacle_point_subtraction</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <!-- RViz is optional: install/build rviz2 and rviz_mesh_tools_plugins only on
+       a computer where start_rviz:=true is requested. -->
+  <export><build_type>ament_python</build_type></export>
+</package>

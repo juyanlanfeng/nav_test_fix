@@ -1,2 +1,0 @@
-ScanInfo  info
-RangeData data

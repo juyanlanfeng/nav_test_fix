@@ -1,0 +1,18 @@
+# Requires patches/pcl_real_interfaces.patch; old PCL ignores the new parameters.
+# Launch resolves files, frames, offsets, thresholds and topic names from the
+# external bundle. It never starts cloud_tf_publisher: hardware owns all TF.
+obstacle_sub:
+  ros__parameters:
+    use_sim_time: false
+    input_cloud_topic: /cloud
+    output_cloud_topic: /dynamic_obstacles
+    base_frame: base_footprint
+    lidar_frame: lidar_link
+    odom_frame: map
+    pcd_file_path: ""
+    distance_threshold: null
+    robot_radius: null
+    sensor_offset_xyz: [0.0, 0.0, 0.0]
+    input_qos: BestEffort
+    max_cloud_age_s: 0.30
+    max_future_s: 0.001

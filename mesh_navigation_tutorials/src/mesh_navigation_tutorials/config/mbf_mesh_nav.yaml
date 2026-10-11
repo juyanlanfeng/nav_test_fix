@@ -46,7 +46,7 @@ meshnav_launch:
   ros__parameters:
     map_name: 'rmuc2026_field'       # RMCL 地图名；对应 maps/<名称>.ply。
     localization: 'ground_truth'     # 定位方式：ground_truth 或 rmcl_micpl。
-    obstacle_segmentation: 'rmcl_seg'  # 障碍点云来源：none、ground_truth 或 rmcl_seg。
+    obstacle_segmentation: 'none'  # 障碍点云来源：none、ground_truth 或 rmcl_seg。
     start_rviz: 'True'               # 是否打开导航 RViz。
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
     startup_timeout_s: '180'         # 导航就绪检查最长等待时间，秒；0 为单次检查。

@@ -1,1 +1,0 @@
-MICPSensorStats[] sensors
