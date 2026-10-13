@@ -44,7 +44,7 @@
 # 仅供启动文件读取的导航选项；meshnav_launch 不是 ROS 节点。
 meshnav_launch:
   ros__parameters:
-    map_name: 'rmuc2026_field'       # RMCL 地图名；对应 maps/<名称>.ply。
+    map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
     start_rviz: 'True'               # 是否打开导航 RViz。
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
 
@@ -67,7 +67,8 @@ move_base_flex:
     global_frame: 'map'          # 全局坐标系。RViz 点的目标坐标就在这个系里；
                                  # 换掉它，所有目标坐标的含义都会跟着变。
     robot_frame: 'base_footprint'  # 车体坐标系（贴地投影）。规划器用它查询机器人位姿。
-    odom_topic: 'odom'           # 里程计话题；MBF 由它拿机器人速度（速度长期为 0 会
+    # 来自TfTransformer，后面需要单独启动
+    odom_topic: '/Odometry_transformed'           # 里程计话题；MBF 由它拿机器人速度（速度长期为 0 会
                                  # 触发下面的 cmd_vel_ignored_tolerance）。
 
     # ---- 时间与到达前后行为 -------------------------------------------------
@@ -122,11 +123,11 @@ move_base_flex:
 
     mesh_map:
       # ---- 输入与缓存 -------------------------------------------------------
-      mesh_file: '/home/rainple/nav_test/mesh_navigation_tutorials/src/mesh_navigation_tutorials/maps/rmuc2026_field.ply'
+      mesh_file: '/home/rm/nav_test_fix/mesh_navigation_tutorials/maps/ply/scanned_map.ply'
       #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
-      mesh_working_file: '/home/rainple/nav_test/mesh_navigation_tutorials/rmuc2026_field.h5'
+      mesh_working_file: '/home/rm/nav_test_fix/mesh_navigation_tutorials/cache/mesh_nav.h5'
       #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
       #     mesh_map_working_path 覆盖。它只是缓存，不是源地图；
       #     参数或 PLY 一变就必须重算（见文件头《缓存失效规则》）。

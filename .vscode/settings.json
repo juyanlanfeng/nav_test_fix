@@ -1,5 +1,14 @@
 {
     "cmake.sourceDirectory": "${workspaceFolder}/mesh_navigation_tutorials/src/mesh_navigation/mesh_layers",
     "cmake.buildDirectory": "${workspaceFolder}/mesh_navigation_tutorials/build/mesh_layers",
-    "cmake.configureOnOpen": false
+    "cmake.configureOnOpen": false,
+    "ROS2.distro": "humble",
+    "python.autoComplete.extraPaths": [
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
 }
