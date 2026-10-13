@@ -13,6 +13,8 @@
     <author email="alexander.mock@naturerobots.com">Alexander Mock</author>
     <author email="jubraun@uos.de">Justus Braun</author>
 
+    <buildtool_depend>ament_cmake_ros</buildtool_depend>
+
     <depend>mesh_map</depend>
     <depend>lvr2</depend>
     <depend>geometry_msgs</depend>

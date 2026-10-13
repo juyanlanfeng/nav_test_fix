@@ -126,14 +126,14 @@ public:
         tf2::fromMsg(footprint_to_lidar_.transform, T_footprint_lidar);
         tf2::Transform T_odom_lidar = (T_footprint_lidar * T_odom_footprint).inverse();
 
-        // --- gazebo发布的tf与点云中心存在偏差,这里直接强制纠正,后面需要去除 ---
-        // Gazebo 测量原点相对雷达 link，沿局部 Z 轴偏移 +0.03 m。
-        tf2::Transform T_lidar_sensor;
-        T_lidar_sensor.setIdentity();
-        T_lidar_sensor.setOrigin(tf2::Vector3(0.0, 0.0, 0.03));
-        // 将测量原点的偏移合入点云到 odom 的变换。
-        T_odom_lidar = T_odom_lidar * T_lidar_sensor;
-        // ----------------------------------------------------------------------
+        // // --- gazebo发布的tf与点云中心存在偏差,这里直接强制纠正,后面需要去除 ---
+        // // Gazebo 测量原点相对雷达 link，沿局部 Z 轴偏移 +0.03 m。
+        // tf2::Transform T_lidar_sensor;
+        // T_lidar_sensor.setIdentity();
+        // T_lidar_sensor.setOrigin(tf2::Vector3(0.0, 0.0, 0.03));
+        // // 将测量原点的偏移合入点云到 odom 的变换。
+        // T_odom_lidar = T_odom_lidar * T_lidar_sensor;
+        // // ----------------------------------------------------------------------
 
         lidar_to_odom_.header.stamp = msg->header.stamp;
         lidar_to_odom_.header.frame_id = odom_frame_;

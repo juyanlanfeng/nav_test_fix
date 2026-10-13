@@ -45,11 +45,8 @@
 meshnav_launch:
   ros__parameters:
     map_name: 'rmuc2026_field'       # RMCL 地图名；对应 maps/<名称>.ply。
-    localization: 'ground_truth'     # 定位方式：ground_truth 或 rmcl_micpl。
-    obstacle_segmentation: 'none'  # 障碍点云来源：none、ground_truth 或 rmcl_seg。
     start_rviz: 'True'               # 是否打开导航 RViz。
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
-    startup_timeout_s: '180'         # 导航就绪检查最长等待时间，秒；0 为单次检查。
 
 # PB 目标协调节点：周期检查剩余路线，只有旧路不可通行时才重规划。
 meshnav_navigator:
@@ -113,63 +110,6 @@ move_base_flex:
       max_lin_velocity: 0.8    # 平面合速度上限 sqrt(vx²+vy²)，米/秒。
       max_ang_velocity: 0.5    # 角速度上限，弧度/秒，沿用 MeshController 默认值。
       arrival_fading: 0.5      # 距目标小于此距离时逐渐减速，米。
-
-      # MPPI 备用配置（当前不加载）。切换时停用上面的控制器参数，再启用下面整段。
-      # type: 'mesh_mppi/DiffDriveMPC'
-      # # 如果机器人当前位置对应的 MeshMap 代价值大于或等于该值，
-      # # 控制器会认为机器人发生了碰撞
-      # map_cost_limit: 1.0
-      # # 进度检查相关参数
-      # progress_check:
-      #   # 在进度检查的时间窗口内，机器人至少需要移动的距离，单位：米
-      #   translation_threshold: 0.25
-      #   # 机器人需要达到的代价降低比例，满足该条件时认为机器人仍在取得进展
-      #   # 注意：这里使用的代价并不是 MeshMap 中的地图代价！
-      #   # 这里使用的是代价函数针对优化后的控制信号序列所预测得到的代价
-      #   cost_reduction_threshold: 0.25
-      #   # 用于进度检查的时间窗口，单位：秒
-      #   # 如果在指定时间内，上述任何一个进度条件都没有满足，
-      #   # 则认为机器人陷入卡住（stuck）状态
-      #   timeframe: 5.0
-      # # 运动学模型相关参数
-      # kinematics:
-      #   # 速度限制
-      #   linear_velocity_max: 0.8       # 最大线速度 [m/s]；为点云更新、重规划和底盘跟踪留出反应距离。
-      #   linear_velocity_min: -0.25     # 最小线速度，负值表示允许倒车
-      #   angular_velocity_max: 1.0      # 最大角速度
-      #   # 加速度限制
-      #   linear_acceleration_max: 10.0   # 最大线加速度
-      #   linear_acceleration_min: -3.0  # 最小线加速度 / 最大减速度
-      #   angular_acceleration_max: 9.0  # 最大角加速度
-      # # MPPI 优化器相关参数
-      # optimizer:
-      #   # 向未来预测机器人轨迹时使用的时间步数量
-      #   prediction_steps: 56
-      #   # 每次控制器迭代时采样并预测的轨迹数量
-      #   # 控制器运行频率由 move_base_flex 的 controller_frequency 参数决定
-      #   prediction_samples: 1000
-      #   # 用于采样控制信号的标准差
-      #   # 标准差参数的数量取决于所使用的运动学模型
-      #   stddev:
-      #     # 线速度采样标准差，单位：m/s
-      #     - 0.2
-      #     # 角速度采样标准差，单位：rad/s
-      #     - 0.4
-      #   # 控制器的温度参数
-      #   temperature: 2.0
-      #   # 控制器的控制代价参数
-      #   gamma: 0.015
-      # # 代价函数相关参数
-      # cost:
-      #   # 横向跟踪误差（Cross-Track Error, XTE）权重
-      #   # 用于惩罚机器人偏离参考路径的行为
-      #   xte_weight: 5.0
-      #   # 地图代价权重
-      #   # 用于惩罚机器人进入 MeshMap 分层代价地图中代价较高的区域
-      #   map_weight: 5.0
-      #   # 目标代价权重
-      #   # 用于鼓励控制器让机器人不断朝目标方向前进
-      #   goal_weight: 10.0
 
     controller_patience: 2.0     # 单次控制步超时 [s]。
     controller_max_retries: 4    # 控制失败重试次数。

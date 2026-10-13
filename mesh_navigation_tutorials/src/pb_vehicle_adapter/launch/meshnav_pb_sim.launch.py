@@ -1,130 +1,201 @@
-"""Start PB simulation and MeshNav from their respective YAML files."""
+"""实车 MeshNav 入口：MBF、导航协调器、速度接口和可选 RViz。
+
+保留历史文件名。所有节点强制使用系统时间；定位、TF、雷达、点云差分及
+底盘驱动需另行启动。本文件不会启动 Gazebo 或发布机器人真值。
+"""
+
+import atexit
 import os
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (
-    ExecuteProcess,
-    IncludeLaunchDescription,
-    TimerAction,
-)
-from launch.conditions import IfCondition, UnlessCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
+from launch.event_handlers import OnShutdown
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import yaml
 
-def generate_launch_description():
 
-    # [SIM/COMMON] 获取已安装功能包的 share 目录，不是直接使用 src 目录。
-    # sim_share、gz_share 是仿真专用；mesh_share 提供可复用的导航配置。
-    # 注意：这些查找发生在启动条件判断之前。因此 start_sim=False 仍要求
-    # mesh_navigation_tutorials_sim、ros_gz_sim 可被找到，不能当作实车入口。
-    pb_share = get_package_share_directory("pb_vehicle_adapter")
-    sim_share = get_package_share_directory("mesh_navigation_tutorials_sim")
-    mesh_share = get_package_share_directory("mesh_navigation_tutorials")
-    gz_share = get_package_share_directory("ros_gz_sim")
-    with open(os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml"), encoding="utf-8") as stream:
-        nav_config = yaml.safe_load(stream)
-    # meshnav_launch 是供本 launch 读取的配置块，不会因此生成同名 ROS 节点。
-    # move_base_flex 是导航服务器的参数块；其插件与地图参数由后面的子 launch 加载。
-    nav_options = nav_config["meshnav_launch"]["ros__parameters"]
-    nav_params = nav_config["move_base_flex"]["ros__parameters"]
+def _load_yaml(path):
+    with open(path, encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    if not isinstance(config, dict):
+        raise ValueError(f"配置文件必须是 YAML 字典：{path}")
+    return config
 
-    # [COMMON，当前输出接 SIM] 速度适配器选择 control_source 指定的来源。
-    # 默认 MeshNav 输入 /cmd_vel 为 TwistStamped，输出 /pb/cmd_vel_safe 为 Twist；
-    # 节点负责命令时效检查、周期输出和超时处理，本 launch 没有覆盖这些话题。
-    # hold_enabled=True 时，还读取 hold_pose_topic（默认 /odom）及 ExePath 状态，
-    # 执行任务结束后的驻车保持；实车是否启用需结合真实里程计与底盘能力决定。
-    # [REAL] 可复用或替换为实车速度网关，但要显式配置输入/输出话题、时间、
-    # 坐标系和限速策略；输出应交给实际底盘驱动。本节点不实现串口/CAN 通信。
+
+def _parameters(config, name):
+    params = config.get(name, {}).get("ros__parameters", {})
+    if not isinstance(params, dict):
+        raise ValueError(f"{name}.ros__parameters 必须是字典")
+    return params
+
+
+def _boolean(value):
+    if isinstance(value, bool):
+        return value
+    if str(value).lower() in ("true", "1"):
+        return True
+    if str(value).lower() in ("false", "0"):
+        return False
+    raise ValueError(f"start_rviz 必须为 true 或 false：{value}")
+
+
+def _topic(display, key, value):
+    """保留 RViz 话题字段的 QoS 配置，仅替换话题名。"""
+    if isinstance(display.get(key), dict):
+        display[key]["Value"] = value
+    else:
+        display[key] = value
+
+
+def _rviz_file(source, global_frame, robot_frame, navigator, view):
+    """生成临时视图，使接口配置生效；不修改仓库中的 .rviz 文件。"""
+    config = _load_yaml(source)
+    manager = config["Visualization Manager"]
+    manager.setdefault("Global Options", {})["Fixed Frame"] = global_frame
+    current_view = manager.get("Views", {}).get("Current", {})
+    if current_view.get("Target Frame") == "base_footprint":
+        current_view["Target Frame"] = robot_frame
+    displays = manager.setdefault("Displays", [])
+    obstacle_found = False
+
+    def update(items):
+        nonlocal obstacle_found
+        for display in items:
+            kind = display.get("Class")
+            if kind == "rviz_default_plugins/Grid":
+                display["Reference Frame"] = global_frame
+            elif kind == "rviz_default_plugins/RobotModel":
+                _topic(display, "Description Topic", view["robot_description_topic"])
+            elif kind == "rviz_default_plugins/PointCloud2":
+                topic = display.get("Topic", {})
+                name = topic.get("Value") if isinstance(topic, dict) else topic
+                if name == "/dynamic_obstacles":
+                    _topic(display, "Topic", view["obstacle_topic"])
+                    obstacle_found = True
+                elif name in ("/cloud", "/cloud_registered"):
+                    _topic(display, "Topic", view["cloud_topic"])
+            update(display.get("Displays", []))
+
+    update(displays)
+    if not obstacle_found:
+        displays.append({
+            "Class": "rviz_default_plugins/PointCloud2",
+            "Name": "Dynamic Obstacles", "Enabled": True,
+            "Color Transformer": "FlatColor", "Color": "255; 80; 30",
+            "Position Transformer": "XYZ", "Style": "Points", "Size (Pixels)": 3,
+            "Topic": {"Value": view["obstacle_topic"], "Depth": 1,
+                      "Reliability Policy": "Best Effort", "Durability Policy": "Volatile",
+                      "History Policy": "Keep Last"},
+        })
+    for tool in manager.get("Tools", []):
+        if tool.get("Class") in ("rviz_mesh_tools_plugins/MeshGoal",
+                                  "rviz_default_plugins/SetGoal"):
+            _topic(tool, "Topic", navigator["goal_topic"])
+
+    # 临时文件保持到 RViz 退出；正常 launch 关闭及解释器退出均会清理。
+    temporary = tempfile.TemporaryDirectory(prefix="meshnav_rviz_")
+    atexit.register(temporary.cleanup)
+    path = os.path.join(temporary.name, "navigation.rviz")
+    with open(path, "w", encoding="utf-8") as stream:
+        yaml.safe_dump(config, stream, allow_unicode=True, sort_keys=False)
+    return path, temporary
+
+
+def _create_nodes(context):
+    def argument(name):
+        return LaunchConfiguration(name).perform(context)
+
+    nav_file = argument("navigation_params_file")
+    interfaces_file = argument("interfaces_file")
+    config = _load_yaml(nav_file)
+    interfaces = _load_yaml(interfaces_file)
+    nav_params = _parameters(config, "move_base_flex")
+    nav_options = _parameters(config, "meshnav_launch")
+
+    # MBF：完整导航 YAML 提供地图、地图层、规划器及控制插件；接口 YAML
+    # 随后覆盖 frame/odom 等接线参数；系统时间覆盖任何遗留 use_sim_time。
+    mbf_params = dict(nav_params)
+    mbf_params.update(_parameters(interfaces, "move_base_flex"))
+    navigator = dict(_parameters(interfaces, "meshnav_navigator"))
+    adapter = _parameters(interfaces, "pb_cmd_vel_adapter")
+    for group, selection in (("planners", "planner"), ("controllers", "controller")):
+        loaded = mbf_params.get(group, [])
+        if not loaded:
+            raise ValueError(f"move_base_flex.{group} 至少需要一个插件实例")
+        navigator.setdefault(selection, loaded[0])
+        if navigator[selection] not in loaded:
+            raise ValueError(f"协调器的 {selection} '{navigator[selection]}' 未在 MBF {group} 中配置")
+    navigator.setdefault("goal_topic", "/rviz/goal_pose")
+    navigator.setdefault("get_path_action", "/move_base_flex/get_path")
+    navigator.setdefault("exe_path_action", "/move_base_flex/exe_path")
+    navigator.setdefault("check_path_service", "/move_base_flex/check_path_cost")
+
+    robot_frame = mbf_params.get("robot_frame", "base_footprint")
+    if robot_frame.lstrip("/") != adapter.get("base_frame", "base_footprint").lstrip("/"):
+        raise ValueError("move_base_flex.robot_frame 必须与 pb_cmd_vel_adapter.base_frame 一致")
+    overrides = {"use_sim_time": False}
+    # 可在部署时覆盖地图和可写的 HDF5 缓存路径，无需修改导航 YAML。
+    for name, parameter in (("mesh_map_path", "mesh_map.mesh_file"),
+                            ("mesh_map_working_path", "mesh_map.mesh_working_file")):
+        if argument(name):
+            overrides[parameter] = argument(name)
+
+    meshnav = Node(
+        package="mbf_mesh_nav", executable="mbf_mesh_nav", name="move_base_flex",
+        output="screen", parameters=[nav_file, interfaces_file, overrides],
+        remappings=[
+            ("/move_base_flex/cmd_vel", adapter.get("input_topic", "/cmd_vel")),
+            ("/move_base_flex/get_path", navigator["get_path_action"]),
+            ("/move_base_flex/exe_path", navigator["exe_path_action"]),
+            ("/move_base_flex/check_path_cost", navigator["check_path_service"]),
+        ],
+    )
+    coordinator = Node(
+        package="pb_vehicle_adapter", executable="meshnav_navigator", name="meshnav_navigator",
+        output="screen", parameters=[interfaces_file, navigator, {"use_sim_time": False}],
+    )
     velocity = Node(
-        package="pb_vehicle_adapter",
-        executable="pb_cmd_vel_adapter",
-        name="pb_cmd_vel_adapter",
-        output="screen",
-        parameters=[{
-            "use_sim_time": False,
-            "control_source": "meshnav",
-            "hold_enabled": True,
-            "hold_pose_topic": "/odom",
-            "hold_gain": 1.0,
-            "hold_max_linear_velocity": 0.1,
-            "hold_max_angular_velocity": 0.2,
-            "hold_angular_deadband": 0.02,
-        }],
+        package="pb_vehicle_adapter", executable="pb_cmd_vel_adapter", name="pb_cmd_vel_adapter",
+        output="screen", parameters=[interfaces_file, {"use_sim_time": False}],
     )
+    nodes = [meshnav, coordinator, velocity]
+    start_rviz = argument("start_rviz") or nav_options.get("start_rviz", True)
+    if _boolean(start_rviz):
+        pb_share = get_package_share_directory("pb_vehicle_adapter")
+        source = argument("rviz_config") or os.path.join(
+            pb_share, "rviz", nav_options.get("meshnav_rviz_config", "pb_meshnav.rviz"))
+        view = {"cloud_topic": "/cloud_registered", "obstacle_topic": "/dynamic_obstacles",
+                "robot_description_topic": "/robot_description"}
+        view.update(_parameters(interfaces, "meshnav_rviz"))
+        path, temporary = _rviz_file(
+            source, mbf_params.get("global_frame", "map"), robot_frame, navigator, view)
+        nodes.append(RegisterEventHandler(OnShutdown(on_shutdown=[
+            OpaqueFunction(function=lambda context: temporary.cleanup()),
+        ])))
+        nodes.append(Node(
+            package="rviz2", executable="rviz2", name="rviz2_meshnav", output="screen",
+            arguments=["-d", path], parameters=[{"use_sim_time": False}],
+        ))
+    # 进程异步启动。外部 TF、定位和障碍点云是否就绪仍需单独确认。
+    return nodes
 
-    # [COMMON] 启动导航服务器 move_base_flex，由 MBF 子 launch 读取导航 YAML。
-    # 同一服务器中加载 MeshMap、地图层、规划器和控制器插件；这些不是各自
-    # 单独启动的 ROS 节点。当前配置选择 CVP + MeshController，没有使用 MPPI。
-    # 子 launch 将 /move_base_flex/cmd_vel 重映射到 /cmd_vel（TwistStamped）。
-    # [REAL] 可复用这些导航包，须提供真实 /odom、定位 TF、PLY 地图和障碍输入，
-    # 配置真实车体、运动能力、可写 H5 缓存路径，并将 use_sim_time 设为 false。
-    # 地图由 Blender 制作不影响这里对 LVR2 运行时网格库的依赖。
-    meshnav = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            mesh_share, "launch", "mbf_mesh_navigation_server_launch.py",
-        )),
-    )
-    # [COMMON，可选 UI] RViz 显示地图、路径、点云和 TF，可用于仿真或实车。
-    # 此处选择 PB RViz 配置；目标工具的话题需要与 navigator.goal_topic 对应。
-    # [REAL] 可在操作电脑上运行，机器人无需打开 GUI；同时调整显示话题和 frame。
-    rviz = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="rviz2_meshnav",
-        output="screen",
-        arguments=["-d", os.path.join(pb_share, "rviz", nav_options["meshnav_rviz_config"])],
-        parameters=[{"use_sim_time": nav_params["use_sim_time"]}],
-        condition=IfCondition(str(nav_options["start_rviz"])),
-    )
-    # [COMMON] 导航协调节点：默认订阅 /rviz/goal_pose（PoseStamped），
-    # 调用 MBF /move_base_flex/get_path（GetPath）和 /exe_path（ExePath），
-    # 按 planner_frequency 检查剩余路线代价，受阻时协调重新规划与执行。
-    # 同时提供 /meshnav_navigator/status 和 /meshnav_navigator/cancel。
-    # planner/controller 是 YAML 中的插件实例名，不是新建节点名。
-    # 这里不直接控制电机，不提供定位，也不执行点云分割。
-    # [REAL] 可保留；确认目标位姿处于导航地图坐标系，且 action/service 名称一致。
-    # 加载整个 YAML 时，按节点名匹配参数块，其他节点的配置不会全部注入该节点。
-    navigator = Node(
-        package="pb_vehicle_adapter",
-        executable="meshnav_navigator",
-        name="meshnav_navigator",
-        output="screen",
-        parameters=[os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml"), {
-            "use_sim_time": nav_params["use_sim_time"],
-            "planner_frequency": nav_params["planner_frequency"],
-            "planner": nav_params["planners"][0],
-            "controller": nav_params["controllers"][0],
-        }],
-    )
 
-    # --wait-timeout 是检查重试超时，不是延后启动导航节点的等待时间。
-    # 它检查推进中的 /clock、TF、节点/action 和 PB 速度来源等仿真条件；
-    # 只读检查不发送导航目标或速度，也不会作为上面节点的启动屏障。
-    # 检查进程退出失败不会自动停止此前启动的节点，本文件未配置这种联动。
-    # [REAL] 应换为真实定位、传感器、TF 和底盘接口的检查，不能要求 /clock 推进。
-    startup_check = TimerAction(
-        period=2.0,
-        actions=[ExecuteProcess(
-            cmd=[
-                "ros2", "run", "pb_vehicle_adapter", "pb_preflight",
-                "--framework", "meshnav",
-                "--wait-timeout", str(nav_options["startup_timeout_s"]),
-            ],
-            output="screen",
-        )],
-    )
-
-    # 启动组织顺序：仿真分组 -> 可选 RMCL -> 既有适配器来源切换 -> MBF
-    # -> 导航协调 -> 可选 RViz -> 延迟检查。条件不满足的动作会跳过。
-    # 这是 launch 动作的列举顺序；各进程异步运行，不保证按此顺序完成初始化。
-    # 真正发起一次导航还需要目标消息，以及已可用的地图、TF、里程计、
-    # 所选障碍输入和底盘命令接口；创建这些动作本身不等于接口已就绪。
+def generate_launch_description():
+    pb_share = get_package_share_directory("pb_vehicle_adapter")
+    mesh_share = get_package_share_directory("mesh_navigation_tutorials")
     return LaunchDescription([
-        meshnav,
-        navigator,
-        rviz,
-        startup_check,
-        velocity,
+        DeclareLaunchArgument("navigation_params_file", default_value=os.path.join(
+            mesh_share, "config", "mbf_mesh_nav.yaml"), description="完整 MeshNav 导航参数文件"),
+        DeclareLaunchArgument("interfaces_file", default_value=os.path.join(
+            pb_share, "config", "interfaces.yaml"), description="实车接口参数文件，最后覆盖导航接口"),
+        DeclareLaunchArgument("mesh_map_path", default_value="", description="PLY 地图；空值沿用导航 YAML"),
+        DeclareLaunchArgument("mesh_map_working_path", default_value="",
+                              description="可写 HDF5 缓存；空值沿用导航 YAML"),
+        DeclareLaunchArgument("start_rviz", default_value="",
+                              description="true/false；空值沿用导航 YAML"),
+        DeclareLaunchArgument("rviz_config", default_value="", description="RViz 模板；空值使用包内配置"),
+        OpaqueFunction(function=_create_nodes),
     ])

@@ -34,18 +34,13 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-import yaml
 
 
 def _create_actions(context):
     mesh_share = get_package_share_directory("mesh_navigation_tutorials")
     config_file = os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml")
-    with open(config_file, encoding="utf-8") as stream:
-        params = yaml.safe_load(stream)["move_base_flex"]["ros__parameters"]
     parameter_files = [config_file]
-    if "pb_terminal_controller" in params["controllers"]:
-        pb_share = get_package_share_directory("pb_vehicle_adapter")
-        parameter_files.append(os.path.join(pb_share, "config", "pb_terminal_controller.yaml"))
+    # 所选控制插件的参数统一放在本导航 YAML 中，不再加载已删除的 PB 参数文件。
 
     # 通用教程可为所选地图覆盖 YAML 中的 PB 默认路径。
     overrides = {}

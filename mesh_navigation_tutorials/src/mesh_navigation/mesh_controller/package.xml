@@ -15,6 +15,9 @@
     <author email="alexander.mock@naturerobots.com">Alexander Mock</author>
     <author email="jubraun@uos.de">Justus Braun</author>
 
+    <buildtool_depend>ament_cmake_ros</buildtool_depend>
+    <depend>lvr2</depend>
+
     <depend>mbf_mesh_core</depend>
     <depend>mbf_msgs</depend>
     <depend>mbf_utility</depend>
