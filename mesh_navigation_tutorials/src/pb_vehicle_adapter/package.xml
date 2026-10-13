@@ -3,7 +3,7 @@
 <package format="3">
   <name>pb_vehicle_adapter</name>
   <version>0.1.0</version>
-  <description>PolarBear 2025 vehicle adapter for the RMUC2026 MeshNav and JIE simulation stacks.</description>
+  <description>MeshNav navigation coordinator and real-robot velocity interface.</description>
   <maintainer email="maintainers@example.invalid">nav_test maintainers</maintainer>
   <license>Apache-2.0</license>
 
@@ -17,24 +17,14 @@
   <depend>nav_msgs</depend>
   <depend>rcl_interfaces</depend>
   <depend>rclpy</depend>
-  <depend>robot_state_publisher</depend>
-  <depend>ros_gz_bridge</depend>
-  <depend>ros_gz_sim</depend>
-  <depend>rosgraph_msgs</depend>
-  <depend>sensor_msgs</depend>
-  <depend>tf2_msgs</depend>
-  <depend>tf2_ros</depend>
   <exec_depend>python3-yaml</exec_depend>
 
   <exec_depend>mbf_mesh_nav</exec_depend>
   <exec_depend>mbf_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
-  <exec_depend>mesh_navigation_tutorials</exec_depend>
-  <exec_depend>mesh_navigation_tutorials_sim</exec_depend>
-  <exec_depend>octo_planner</exec_depend>
-  <exec_depend>jie_octomap</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>rviz_mesh_tools_plugins</exec_depend>
 
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

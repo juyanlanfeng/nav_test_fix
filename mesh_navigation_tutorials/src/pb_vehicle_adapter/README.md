@@ -1,486 +1,155 @@
-# PB2025 Gazebo vehicle adapter
+# MeshNav 实车导航接口
 
-This package runs the RMUC2026 field with a **low-clearance** PB2025 test vehicle:
-the original wheels and omnidirectional motion, 2-D lidar, MID-360, IMU and
-camera, but without the gimbal, armor, light bar, speed monitor and in-chassis
-projectile container - the superstructure that put the collision envelope at
-0.4491 m and made the robot unable to enter the RMUC tunnels (local clear height
-0.2472 m).  The body is a 0.36 x 0.24 x 0.13 m box and the collision envelope is
-0.5656 x 0.4332 x 0.2258 m, so it passes both tunnels with ~0.02 m of head
-clearance.  See `doc/PB_LOW_CLEARANCE_VEHICLE_PLAN.md` for the design and its
-acceptance record.
+本包保留两个节点：`meshnav_navigator` 管理导航任务，`pb_cmd_vel_adapter`
+将导航速度转换为底盘驱动接收的消息。包名与可执行程序名保持现有名称。
 
-The package supplies exactly one navigation transform chain
-(`map -> odom -> base_footprint`) from Gazebo world truth and routes the selected
-stamped navigation command through a 0.5-second watchdog before it reaches
-`/robot/cmd_vel`.
+## 文件用途
 
-Build the package after generating or changing the vehicle descriptions:
+| 文件 | 用途 |
+| --- | --- |
+| `pb_vehicle_adapter/meshnav_navigator.py` | 接收目标，调用 MBF 规划、执行、检查剩余路线并按需重规划 |
+| `pb_vehicle_adapter/cmd_vel_adapter.py` | 单路 `TwistStamped → Twist`、坐标系名称检查、指令超时清零 |
+| `config/interfaces.yaml` | 集中配置话题、action/service、车体坐标系和时间参数 |
+| `launch/meshnav_real.launch.py` | 启动上述节点；提供导航参数文件时同时启动 MBF |
+| `launch/meshnav_rviz.launch.py` | 仅启动可视化，适合在操作电脑连接已运行的导航 |
+| `rviz/meshnav_real.rviz` | 网格地图、代价、路径、点云、TF 与 Mesh Goal 工具 |
+
+## 数据接口
+
+```text
+目标 PoseStamped → meshnav_navigator → MBF GetPath / ExePath
+                                           ↓
+                                 /cmd_vel (TwistStamped)
+                                           ↓
+                                  pb_cmd_vel_adapter
+                                           ↓
+                                 /base/cmd_vel (Twist)
+                                           ↓
+                                       实车底盘驱动
+```
+
+默认接口如下，话题名可在 `config/interfaces.yaml` 修改：
+
+| 接口 | 类型 | 发布/服务提供方 → 使用方 |
+| --- | --- | --- |
+| `/rviz/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz 或任务程序 → 导航协调器 |
+| `/move_base_flex/get_path` | `mbf_msgs/action/GetPath` | MBF 服务端 ← 导航协调器 |
+| `/move_base_flex/exe_path` | `mbf_msgs/action/ExePath` | MBF 服务端 ← 导航协调器 |
+| `/move_base_flex/check_path_cost` | `mbf_msgs/srv/CheckPath` | MBF 服务端 ← 导航协调器 |
+| `/meshnav_navigator/status` | `std_msgs/msg/String`，JSON | 导航协调器 → 监控端 |
+| `/meshnav_navigator/cancel` | `std_srvs/srv/Trigger` | 导航协调器服务端 ← 任务程序 |
+| `/cmd_vel` | `geometry_msgs/msg/TwistStamped` | MBF → 速度适配器 |
+| `/base/cmd_vel` | `geometry_msgs/msg/Twist` | 速度适配器 → 底盘驱动 |
+| `/odom` | `nav_msgs/msg/Odometry` | 外部里程计/定位系统 → MBF |
+
+状态与取消接口使用节点私有名称 `~/status`、`~/cancel`；可通过 ROS remapping
+修改。其余协调接口通过 YAML 参数修改。节点根键与 launch 中的节点名保持一致。
+目标与地图的坐标系应一致。MBF 的 `robot_frame` 与适配器 `base_frame` 应一致。
+适配器要求非空且匹配的 `header.frame_id`，不会旋转速度或查询 TF。
+
+## 外部需要提供的功能
+
+- MBF 地图、规划器、控制器和障碍层：由完整导航 YAML 配置，保留 LVR2 等核心依赖。
+- 真实定位、里程计和 TF：通常为 `map → odom → base_footprint → lidar`，
+  按实际定位方案指定各段的唯一发布者；本包不广播任何 TF。
+- 雷达驱动及 `pcl_obstacle_point_subtraction`：单独启动；确保点云、背景地图、
+  TF 对齐，PCL 输出话题与 MBF 障碍层订阅话题一致。
+- 实车底盘驱动：接收配置的 `Twist` 输出，并负责底盘协议、运动学及执行。
+- RViz：使用本包的实车视图在操作电脑启动，目标工具发布到配置的目标话题。
+
+速度适配器原样保留六个速度分量，不做限速或底盘运动学转换；请在控制器及底盘
+配置符合车辆能力的限速。底盘只接受 `TwistStamped` 时，可以不启动适配器，
+让匹配接口的驱动直接订阅 MBF 输出。
+
+## 启动
+
+构建本包（其 ROS 和 MBF 消息依赖需要已安装或构建）：
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/rainple/nav_test/meshnav_demo_ws
-colcon build --packages-select pb_vehicle_adapter --symlink-install
+cd /home/rainple/nav_test/mesh_navigation_tutorials
+colcon build --packages-select pb_vehicle_adapter --symlink-install --parallel-workers 1
 source install/setup.bash
 ```
 
-Start the PB simulation and MeshNav together:
+只启动协调与速度接口，连接已经运行的 MBF：
 
 ```bash
-ros2 launch pb_vehicle_adapter meshnav_pb_sim.launch.py
+ros2 launch pb_vehicle_adapter meshnav_real.launch.py
 ```
 
-Edit `config/pb_vehicle_profile.yaml` for the world, spawn pose, Gazebo GUI and
-vehicle sensors. Edit `mesh_navigation_tutorials/config/mbf_mesh_nav.yaml` for
-navigation, localization and map settings. Set `start_sim` to `False` when reusing an
-already running PB simulation.
-
-## MeshController 全向控制与动态重规划
-
-在上述启动入口中，RViz 的 **Mesh Goal** 发布到 `/rviz/goal_pose`，由
-`meshnav_navigator` 协调 `get_path → exe_path`。它按导航 YAML 中的
-`move_base_flex.planner_frequency`（默认 2 Hz）检查当前剩余路线。**只要旧路仍可通行，
-就不调用规划器、不替换执行路径**，不比较新路是否更短或代价更低。仅在旧路阻断或
-离开网格时请求新规划；新规划返回后再次检查旧路，若已恢复可通行就丢弃新规划。
-检查会裁掉已走过的路段，并检查车到路线的连接段及路径点之间的线段；到目标附近
-也继续检查。`check_path_cost` 使用同一份 final 网格代价和首个规划器的 `cost_limit`，
-膨胀层负责车辆安全余量，检查采样间距为 `path_check_step`（默认 0.025 m）。
-`path_check_max_distance` 是到网格表面的投影容差，不是障碍物膨胀半径。
-重新点击目标会先取消旧任务；旧路不可行且重规划失败、检查服务不可用或位姿反馈
-超时时取消执行并停车。导航 YAML 的 `meshnav_navigator` 段包含服务和超时参数。
-此规则不增加障碍物记忆；雷达漏检导致代价消失的问题需要另行处理。
-这些协调参数在启动时读取，修改 YAML 后重启导航。
-
-当前加载 `mesh_controller/MeshController`，启用 `holonomic: true`，可输出
-`linear.x`、`linear.y` 和 `angular.z`。每次新规划通过同一个 MBF 控制器实例
-更新路径，`setPlan()` 同时读取最新向量场。YAML 中保留了注释掉的 MPPI 备用配置。
-隧道若被障碍代价判为不可通行，或全局重规划失败，切换控制器后仍可能停车。
-
-默认 RViz 配置已移除直接调用 action 的旧 `MbfGoalActions` 面板，避免两个
-客户端同时执行一个目标。不要再用旧测试脚本直接发送 `get_path → exe_path`
-来验证周期重规划：这种调用会绕过协调节点。
+同时启动 MBF，指定你准备的完整导航参数文件与接口配置：
 
 ```bash
-# 查看规划次数和任务状态（succeeded / failed / canceled 等）
-ros2 topic echo /meshnav_navigator/status --qos-durability transient_local
+ros2 launch pb_vehicle_adapter meshnav_real.launch.py \
+  navigation_params_file:=/absolute/path/to/mbf_real.yaml \
+  interfaces_file:=/absolute/path/to/interfaces.yaml
+```
 
-# 取消当前目标，并清除等待执行的新目标
+完整导航 YAML 需要有 `move_base_flex.ros__parameters`，其中包含地图路径、
+`planners`、`controllers`、插件及地图层配置；本包不复制场地地图和机器人尺寸。
+启动时按“完整导航 YAML → interfaces.yaml → 系统时间”覆盖 MBF 参数。
+导航协调器的参数只从接口配置读取，其中 planner/controller 必须是 MBF 中的实例名。
+本入口启动的 MBF 速度输出自动重映射到适配器的 `input_topic`。
+若 MBF 独立启动，需要自行配置同样的重映射及实车时间、frame、odom 参数。
+
+所有由本入口启动的节点使用 `use_sim_time: false`。配置修改后重启生效。
+启动进程不等于接口已就绪；定位、地图、障碍物和底盘接口应先完成接入。
+
+## 可视化
+
+导航已经运行时，在同一 ROS 域的操作电脑上单独打开 RViz：
+
+```bash
+ros2 launch pb_vehicle_adapter meshnav_rviz.launch.py
+```
+
+需要与导航接口一起启动时：
+
+```bash
+ros2 launch pb_vehicle_adapter meshnav_real.launch.py start_rviz:=true
+```
+
+同时启动 MBF 与 RViz：
+
+```bash
+ros2 launch pb_vehicle_adapter meshnav_real.launch.py \
+  navigation_params_file:=/absolute/path/to/mbf_real.yaml start_rviz:=true
+```
+
+两个入口都可传入 `interfaces_file:=/absolute/path/to/interfaces.yaml` 和
+`rviz_config:=/absolute/path/to/custom.rviz`。机器人端默认不打开窗口。
+操作电脑需要 `rviz2` 和本仓库 `rviz_mesh_tools_plugins` 插件。
+
+默认显示网格及 `final` 顶点代价、规划路径、雷达点云、动态障碍点云和 TF。
+使用工具栏 **Mesh Goal** 在网格上发送导航目标。Fixed Frame 使用接口配置中的
+`global_frame`；目标、点云和机器人描述话题也从接口配置读取。网格、代价和路径
+默认连接 `/move_base_flex/...`，修改服务器命名空间时请同步修改 RViz 配置。
+
+`RobotModel` 默认关闭；真实 `robot_state_publisher` 提供 URDF 和 link TF 后，
+在 Displays 中勾选它。没有 URDF 时仍能通过 TF 查看机器人坐标系。
+
+取消导航及查看状态：
+
+```bash
 ros2 service call /meshnav_navigator/cancel std_srvs/srv/Trigger '{}'
+ros2 topic echo /meshnav_navigator/status --qos-durability transient_local
 ```
 
-`mesh_map.obstacle.robot_height=0.50` 是点云向下投影的距离门限，
-不是修改后的车体高度；这是为了接收稀疏扫描中 0.5 m 方块的高处回波。
-车辆几何和建图净空仍保持原值。该取值会保守地阻挡某些低空悬物。
-动态膨胀内圈取 0.40 m（外接半径约 0.356 m 加余量），控制器最大平面合速度
-取 0.8 m/s。参数与原因均在导航 YAML 中注释。
-
-Setting `spawn_rendering_sensors: "False"` in the YAML spawns the same robot without the two
-`gpu_lidar`s and the camera, and is a **fallback for environments that cannot
-render**: when the process has no GPU render node (`/dev/dri`), no `/dev/nvidia*`
-and no X socket, Fortress renders those sensors in software and the simulation
-real-time factor collapses from 0.997 to **0.059**, so no closed-loop run can
-finish.  That is an environment condition, not a property of this project: on a
-normal desktop session with a working GPU (for example the RTX 5070 + Xorg on
-this machine) keep the default `True` and you get the full sensor set at speed.
-Measure it before deciding:
-
-```bash
-bash log/probe_rtf2.sh                       # sensors on  (default model)
-ACCEPT_SENSORS=False bash log/probe_rtf2.sh  # sensors off (reduced model)
-watch -n1 nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv
-```
-
-MeshNav can use its static map without those rendering sensors, so the
-reduced model is also useful for pure navigation runs.  It is produced on the fly by `tools/reduced_robot_model.py`,
-so `models/pb_navigation_robot.sdf` stays the single source of truth.
-
-Read-only readiness check (exits non-zero with per-item failures; `--wait-timeout`
-keeps re-running the checks until they pass or the timeout expires):
-
-```bash
-ros2 run pb_vehicle_adapter pb_preflight --framework meshnav
-ros2 run pb_vehicle_adapter pb_preflight --framework jie
-ros2 run pb_vehicle_adapter pb_preflight --framework dddmr
-ros2 run pb_vehicle_adapter pb_preflight --framework dddmr --wait-timeout 120
-```
-
-Unified goal/cancel client (wraps each framework's native interface).  It runs on
-simulation time, logs the start/final map pose, and takes `--timeout` (wall
-seconds to wait for the action result, default 180):
-
-```bash
-ros2 run pb_vehicle_adapter pb_nav_goal --framework meshnav --case smoke
-ros2 run pb_vehicle_adapter pb_nav_goal --framework jie --case smoke
-ros2 run pb_vehicle_adapter pb_nav_goal --framework dddmr --case smoke --timeout 600
-ros2 run pb_vehicle_adapter pb_nav_goal --framework dddmr --case smoke --cancel
-```
-
-Framework-specific notes:
-
-- **JIE**: `/start_point` and `/goal_point` are published with
-  `TRANSIENT_LOCAL + RELIABLE` because `jie_path_node` subscribes with
-  `QoS(1).transient_local().reliable()`; a default (volatile) publisher is
-  silently incompatible and the planner never answers.  `d1_controller` has no
-  arrival topic, so the client judges arrival from the live map pose (0.30 m xy
-  tolerance) after sending `/start_navigation`.
-- **MeshNav**: `GetPath` is only followed by `ExePath` when the plan succeeded
-  and is non-empty; the outcome codes are reported as-is.
-- **DDDMR**: the action's SUCCESS is `status == 1`, not 0.
-
-The three navigation stacks live in separate workspaces, so a shell that drives
-them needs all of them sourced - for example:
-
-```bash
-source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/meshnav_demo_ws/install/setup.bash   # MeshNav + this package
-source /home/rainple/nav_test/jie_3d_nav/install/setup.bash        # jie_octomap + octo_planner
-source /home/rainple/nav_test/third_party/setup_dddmr_env.sh       # DDDMR only
-```
-
-DDDMR map bundle (regenerate after a map or profile change).  `mapcloud` is the
-**obstacle** cloud and `mapground` the traversable surface: DDDMR's StaticLayer
-marks every ground node whose distance to `mapcloud` is below `inscribed_radius`
-as lethal, so a `mapcloud` that also contains the floor makes the whole map
-unreachable:
-
-```bash
-field/.step_convert_venv/bin/python \
-  meshnav_demo_ws/src/pb_vehicle_adapter/tools/build_dddmr_maps.py
-ros2 run pb_vehicle_adapter pb_dddmr_map_publisher   # Reliable/Transient Local
-```
-
-The generator writes `validation_report.json` with a `navigability` section
-(distance from each ground node to the nearest obstacle) so connectivity can be
-checked before a live run.
-
-DDDMR also needs its dedicated runtime environment, which patches nothing in the
-system but does apply one documented upstream fix:
-
-```bash
-source /home/rainple/nav_test/third_party/setup_dddmr_env.sh
-# third_party/patches/dddmr-06d50cc-actuator-type.patch - upstream 06d50cc never
-# calls configurateActuatorType(), so actuator_type_ stays indeterminate and
-# P2PMoveBase::publishVelocity() discards every trajectory.
-```
-
-The wrapper no longer instantiates the upstream `rm25_example_robot` macro: it
-defines a local `pb_low_chassis` block (base_footprint, base_to_chassis, box
-chassis, four upstream wheel macros) plus local low-mounted sensor blocks whose
-geometry is a simple box with a matching collision.  The sensor link/sensor
-names and topics are unchanged, so the bridge and the topic assignment in
-`tools/generate_descriptions.py` keep working.  Nothing under `third_party/` is
-modified.
-
-Rebuild the envelope after any model change and keep the profile honest:
-
-```bash
-python3 -m pb_vehicle_adapter.robot_envelope          # prints the AABB + per-primitive rows
-python3 -m pytest test/test_low_vehicle_description.py # profile/DDDMR must match
-```
-
-Tunnel acceptance helpers:
-
-```bash
-field/.step_convert_venv/bin/python field/check_tunnel_clearance.py     # static + tilted sweep
-bash log/accept_low_vehicle_tunnel.sh                                   # drive both tunnels, both ways
-field/.step_convert_venv/bin/python field/check_trajectory_clearance.py \
-  log/low_plus_y_trajectory.csv log/low_minus_y_trajectory.csv          # margins from the log
-```
-
-Generate the SDF and URDF only when changing `models/pb_navigation_robot.sdf.xmacro`:
-
-```bash
-PYTHONPATH=/home/rainple/nav_test/third_party/pb2025_python \
-  python3 tools/generate_descriptions.py
-```
-
-## Acceptance fixes (2026-09-08)
-
-These changes close the four items raised by the closed-loop review:
-
-- **RViz action/goal chain**: `rviz/pb_navigation.rviz` now loads the
-  `rviz_mbf_plugins/MbfGoalActions` panel and the `Mesh Goal` tool (topic
-  `/rviz/goal_pose`) for MeshNav, plus the `Publish Point` tool
-  (`/clicked_point`) and the `/selection_markers` MarkerArray for JIE.
-- **JIE start/goal selection**: `launch/pb_jie.launch.py` starts
-  `jie_octomap/rviz_click_selector_node`, which alternates RViz clicks between
-  `/start_point` and `/goal_point` for `jie_path_node`.
-- **Watchdog clock**: `pb_cmd_vel_adapter` creates its watchdog timer on a
-  `ClockType.STEADY_TIME` clock, so it keeps clearing stale commands while
-  `/clock` is paused. Verified directly: with `use_sim_time=true` and no
-  `/clock` published, the steady-clock timer fires while the ROS-time timer
-  does not.
-- **Command timestamps**: `pb_cmd_vel_adapter` rejects unstamped commands and
-  commands whose stamp is more than `max_stamp_age_s` (default 0.5 s) away from
-  the current time.
-- **Profile loading**: `launch/meshnav_pb_sim.launch.py` reads
-  `config/pb_vehicle_profile.yaml` and passes `base_to_chassis_xyz` /
-  `base_to_chassis_xyzw` explicitly to `pb_ground_truth_adapter`. The profile's
-  top-level key (`pb_vehicle`) is a container, not a node name, so it cannot be
-  loaded as a node parameter file directly.
-- **Tests**: `test/test_cmd_vel_adapter.py` adds seven cases (steady-clock
-  timer, fresh/stale/unstamped/wrong-frame rejection, timeout clearing,
-  finiteness); `colcon test --packages-select pb_vehicle_adapter` runs them.
-
-## Closed-loop acceptance fixes (2026-09-15)
-
-Running the shared simulation with the DDDMR stack end to end exposed seven more
-defects; all of them are fixed and covered by tests or recorded evidence (see
-`doc/THREE_PLANNERS_PB_SIM_IMPLEMENTATION.md` section 17):
-
-- **`mapcloud` semantics**: it must be the obstacle cloud, not the complete field
-  geometry. `tools/build_dddmr_maps.py` now samples the non-support faces and
-  drops anything below the local support surface, and reports the resulting
-  ground-to-obstacle distances.
-- **DDDMR runtime environment**: the isolated ackermann-msgs prefix's plain `lib`
-  directory is now on `LD_LIBRARY_PATH`; its introspection library is dlopen'ed,
-  so `ldd` never showed it and `p2p_move_base_node` died at startup.
-- **Upstream actuator type**: the tracked patch
-  `third_party/patches/dddmr-06d50cc-actuator-type.patch` makes the generators
-  configure their actuator type, without which the vehicle never receives a
-  command.
-- **GPU-less simulation**: `spawn_rendering_sensors` (see above).
-- **Rotation limits**: the two rotate-in-place generators sample `theta` inside
-  `[min_vel_theta, max_vel_theta]`; with the inherited 0.1 rad/s ceiling the
-  initial 136 deg alignment needed 24 s and always tripped `p2p_move_base`'s 15 s
-  oscillation watchdog, so the ceiling is now 0.4 rad/s.
-- **Oscillation watchdog distance**: it only resets after `oscillation_distance`
-  metres or 1 rad. The upstream 5 m assumes a ~1 m/s platform; at the PB's
-  0.2 m/s it can never be reached inside the 15 s patience, so every goal became
-  a false oscillation. It is now 1.0 m, guarded by a regression test.
-- **`pb_nav_goal` robustness**: goals run on simulation time, a result future
-  that resolves to `None` (abort/cancel) is reported instead of raising, and
-  `--timeout` controls the wall-clock budget.
-
-- **JIE point QoS**: `pb_nav_goal` publishes `/start_point` and `/goal_point`
-  with `TRANSIENT_LOCAL + RELIABLE` to match `jie_path_node`'s subscription;
-  the default volatile publisher was dropped silently and no path was planned.
-- **JIE arrival**: `pb_nav_goal` waits for the robot's map pose to reach the
-  goal because `d1_controller` publishes no arrival topic. The tolerance is the
-  controller's own (`jie` 0.10 m, `meshnav` 0.20 m) and has to hold for three
-  consecutive samples, so a run cannot report "arrived" while the vehicle is
-  still driving through the tolerance circle.
-
-Closed-loop results in the shared simulation: MeshNav `GetPath outcome=0` ->
-`ExePath outcome=0 message=Controller succeeded; arrived at goal!` (0.14 m from
-the goal), JIE `planned_path with 20 poses` -> `Navigation execution started` ->
-`arrived: 0.291 m from the goal`. Reproduce with `log/accept_meshnav_run.sh` and
-`log/accept_jie_run.sh`.
-
-DDDMR is no longer part of the acceptance scope (user decision, 2026-09-15).
-Its artifacts stay in the package, and the one limitation that was measured - the
-simulated PB cannot execute the lateral/diagonal body-frame commands that
-DDDMR's omnidirectional controller produces, because upstream `MecanumDrive2`
-applies a rotated PID force to the chassis and the wheels are isotropic
-cylinders with `mu = mu2 = 0.2` - is recorded with numbers and next steps in the
-doc's section 17.4.
-
-## Tunnel acceptance with the low vehicle (2026-09-16)
-
-The low-clearance vehicle (doc/PB_LOW_CLEARANCE_VEHICLE_PLAN.md) has to plan and
-drive the two 0.85 m RMUC tunnels. What the tunnel cost that work, and what to
-keep in mind when touching it:
-
-- **The footprint is approximated as a disc.** MeshNav's
-  `static_inflation.inscribed_radius` is a lethal disc around every lethal
-  vertex. Its radius is set in
-  `mbf_mesh_nav.yaml` from the vehicle envelope
-  (`pb_vehicle_adapter.robot_envelope.footprint_radii()`): the *inscribed*
-  radius = half width = 0.216608 m. For a straight corridor the free band is
-  `w - 2 r`, so this radius refuses exactly the corridors the rectangular body
-  cannot pass; the circumscribed radius (0.356 m) rejects the tunnels that the
-  vehicle physically drives through. `test_low_vehicle_description.py` fails if
-  either bound is violated.
-- **Do not size the vehicle for the circle.** The vehicle is 0.4332 m wide in a
-  0.85 m corridor; the physical drives leave 0.17 - 0.21 m per side, and the
-  tunnelled manoeuvres are straight, so the disc model is sound there. Turning in
-  place is *not* covered by it (the corners reach 0.356 m) - see the doc's
-  limitations.
-- **The tunnel wall has a 4 - 7 cm base plate** at `|y| ~ 6.36`. A body that
-  yaws more than ~30 deg inside the corridor puts a wheel on it and jams. The
-  acceptance therefore spawns the vehicle facing its travel direction
-  (`spawn_yaw_deg`), drives heading-aligned
-  (`mesh_controller_holonomic: false`, JIE `align_final_yaw: false`) and uses the
-  measured corridor centreline (`y = +-6.00`) as the goal.
-- **Path sampling matters**: the planner's default `step_width` (0.4 m) is wider
-  than the 0.30 m free band, which made the published polyline weave across the
-  corridor; it is 0.05 m for this map.
-- **Every run needs its own Gazebo partition** (`IGN_PARTITION`/`GZ_PARTITION`,
-  set by `log/accept_env.sh`) and its own ROS domain below 233: Gazebo transport
-  is not ROS-domain scoped, so a leftover simulation keeps answering
-  `ros_gz_sim create` and publishing `/odom` - the "phantom robot" that made an
-  earlier run plan for a vehicle standing several metres away.
-
-Evidence and reproduction commands: `doc/PB_LOW_CLEARANCE_VEHICLE_PLAN.md`
-sections 9.5 and 10; planning grids with `log/probe_tunnel_plan_grid.sh` and
-`log/probe_jie_plan_grid.sh`; layer forensics with `log/probe_save_layers.sh` +
-`field/read_mesh_layers.py`.
-
-### RViz shows an empty scene
-
-The configs load correctly, so an empty view is almost always one of these:
-
-- **The camera looks at the wrong place.** The orbit view focused on the launch
-  file's default spawn `(-11.9, -4.4)` while the tunnel runs spawn the vehicle at
-  `(-1.90, +-5.95)`, i.e. ~14 m to the side and outside the frustum. Both configs
-  now use `Target Frame: base_footprint` and focus on the tunnel mouth, so the
-  camera follows whatever vehicle is spawned; you can also press `FocusCamera` or
-  set `Views -> Target Frame` yourself.
-- **Displays subscribed to topics nobody publishes.** `/pcd_points` is
-  `pcd_to_octomap`'s *input* point cloud (no publisher), and
-  `/octomap_occupied_markers` does not exist: `jie_path_node` publishes the
-  traversability/preblocked overlay as a single `Marker` on
-  `/preblocked_cells_markers`. `pb_jie.rviz` now subscribes `/cloud` (live lidar
-  cloud), `/preblocked_cells_markers`, `/scan`, `/tracking_point_marker`,
-  `/selection_markers` and `/planned_path`.
-- **`/octomap` needs a plugin that is not installed.** The voxel map is
-  `octomap_msgs/Octomap`; showing it requires `ros-humble-octomap-rviz-plugins`
-  (`sudo apt install ros-humble-octomap-rviz-plugins`). Without it, use
-  `/preblocked_cells_markers`, which carries the same free/blocked information as
-  markers.
-
-Quick checks on a live system:
-
-```bash
-ros2 topic info /preblocked_cells_markers     # expect 1 publisher
-ros2 topic info /pcd_points                   # 0 publishers -> that display stays empty
-ros2 run tf2_ros tf2_echo map base_footprint  # expect the vehicle's spawn pose
-```
-
-`/planned_path` only appears after a goal request (`pb_nav_goal --plan-only ...`),
-and the RobotModel only appears once the simulation publishes
-`map -> base_footprint`. The configs are symlinked from `install/` into `src/`, so
-edits take effect by re-opening them in RViz (`File -> Open Config`) without a
-rebuild.
-
-### Where is the floor? (JIE map visualisation)
-
-The blue clutter in the default JIE view is `/preblocked_cells_markers`: the cells
-`jie_path_node` pre-blocks, i.e. an obstacle map, not the ground. The floor,
-walls and tunnel roofs live in two other places:
-
-- **`/octomap`** (`octomap_msgs/Octomap`, 791664 voxels built from
-  `field/converted_rmuc2026/jie_nav/rmuc2026_field.pcd`). RViz can only show it
-  with `ros-humble-octomap-rviz-plugins`, which is *not* installed here:
-  `sudo apt install ros-humble-octomap-rviz-plugins`, then Add -> By topic ->
-  `/octomap`.
-- **`/cloud_pcd`** (the same PCD as a `PointCloud2`, ~631564 points, frame
-  `map`), published by `pb_jie.launch.py` (`publish_map_cloud:=True`, node
-  `pb_map_cloud`) and displayed by `pb_jie.rviz` as "MapCloud (static PCD)".
-
-  **QoS matters here.** RViz's PointCloud2 display subscribes with
-  `Durability: Transient Local`, so the publisher has to offer transient local.
-  `pcl_ros/pcd_to_pointcloud` does **not** (`ros2 topic info --verbose` reports
-  `Durability: VOLATILE`), and the mismatch is fatal: RViz logs
-
-  ```text
-  [pb_map_cloud]: ... incompatible QoS ... Last incompatible policy: DURABILITY_QOS_POLICY
-  ```
-
-  and shows nothing, whether the cloud is sent once or repeatedly. The
-  replacement is `pb_vehicle_adapter/pcd_publisher.py` (entry point
-  `pb_pcd_publisher`, used by the launch file): it reads the PCD once, publishes
-  with `TRANSIENT_LOCAL + RELIABLE + KEEP_LAST(1)` and stays alive, so an RViz
-  started later still receives the cloud.
-
-Because only ~22 % of that cloud is floor, there is also a **ground-only layer**:
-`field/build_jie_floor_pcd.py` keeps the lowest surface of every 4 cm (x, y) cell
-(tolerance 0.05 m) below 0.25 m, which leaves the floor, the ramps and the
-0.203 m platform but drops the tunnel roofs and the surrounding structures
-(307206 of 631564 points, z -0.06 .. 0.18 m):
-
-```bash
-field/.step_convert_venv/bin/python field/build_jie_floor_pcd.py
-# -> field/converted_rmuc2026/jie_nav/rmuc2026_field_floor.pcd
-```
-
-`pb_jie.launch.py` publishes it as `/cloud_pcd_floor` (`publish_floor_cloud`,
-default True) and `pb_jie.rviz` shows it as "MapFloor (ground only)" in cyan,
-next to "MapCloud". `AxisColor` was dropped from both displays: the floor (z ~ 0)
-sits at the blue end of the rainbow and vanished into the blue
-`/preblocked_cells_markers` overlay.
-
-### Picking start/goal in RViz and starting the drive
-
-The **Publish Point** tool feeds `/clicked_point`, and `rviz_click_selector_node`
-alternates between `/start_point` (green arrow) and `/goal_point` (red arrow):
-**the first click is the start, the second the goal**, the third is a new start
-again. A click lands on the `map` z = 0 plane (the grid is 1 m), so no point
-cloud is needed to pick coordinates - the clouds only make it easier to judge
-where you are.
-
-Clicking only *plans*: `jie_path_node` publishes `/planned_path` and
-`d1_controller` waits. It needs `/start_navigation` **after** the path exists - a
-start command that arrives first is dropped with "no pending planned_path is
-available":
-
-```bash
-# after the path appears (RViz shows the blue line, or the log prints
-# "Received planned_path with N poses. Waiting for /start_navigation confirmation.")
-ros2 topic pub --once /start_navigation std_msgs/msg/Bool "{data: true}"
-# stop
-ros2 topic pub --once /stop_navigation std_msgs/msg/Bool "{data: true}"
-```
-
-To get one-click driving instead, start the stack with
-`auto_start_navigation:=True`: the selector then watches `/planned_path` itself
-and sends the confirmation as soon as the plan for your goal arrives.
-
-```bash
-ros2 launch pb_vehicle_adapter pb_jie.launch.py start_sim:=False start_rviz:=True \
-  auto_start_navigation:=True
-```
-
-Verified end to end with `log/verify_rviz_point_nav.sh` (two `/clicked_point`
-messages, no GUI): `Set START` -> `Set GOAL` -> `Auto start: sent
-/start_navigation after a planned_path with 34 poses` -> `Navigation execution
-started` -> `Goal reached ... controller is idle`, with the vehicle moving from
-`x = -1.900` to `x = -0.668`.
-
-Alternatives to clicking: `pb_nav_goal` does plan + start in one command, e.g.
-
-```bash
-ros2 run pb_vehicle_adapter pb_nav_goal --framework jie --x -0.60 --y 6.00 --z 0.06 --yaw 0
-```
-
-To get the clouds into a running session without restarting the launch, use the
-latched publisher (the RViz displays expect `Transient Local`):
-
-```bash
-ros2 run pb_vehicle_adapter pb_pcd_publisher --ros-args \
-  -r __node:=floor_display_debug \
-  -p file_name:=/home/rainple/nav_test/field/converted_rmuc2026/jie_nav/rmuc2026_field_floor.pcd \
-  -p topic:=/cloud_pcd_floor -p frame_id:=map -p period:=0.0
-```
-
-Verify the durability contract on a live system - a transient-local subscriber
-started *after* the publisher is exactly what RViz does:
-
-```bash
-ros2 topic info /cloud_pcd_floor --verbose            # expect Durability: TRANSIENT_LOCAL
-python3 - <<'PROBE'
-import rclpy, time
-from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import PointCloud2
-rclpy.init(); node = rclpy.create_node("probe")
-qos = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
-                 reliability=ReliabilityPolicy.RELIABLE,
-                 durability=DurabilityPolicy.TRANSIENT_LOCAL)
-got = {}
-node.create_subscription(PointCloud2, "/cloud_pcd_floor",
-                         lambda m: got.update(width=m.width, frame=m.header.frame_id), qos)
-deadline = time.time() + 10
-while time.time() < deadline and not got:
-    rclpy.spin_once(node, timeout_sec=0.2)
-print(got or "not received")
-PROBE
-# -> {'width': 307206, 'frame': 'map'}
-```
-
-If you prefer to keep `pcd_to_pointcloud`: set the RViz displays'
-`Durability Policy` to `Volatile` and run it with `period:=1.0` so it keeps
-re-sending. That works, but it streams 631k points (~7.6 MB/s) forever, which is
-why the latched publisher is the default.
-
-For MeshNav the equivalent ground is `/move_base_flex/mesh` (the `Mesh Map`
-display) plus `/move_base_flex/vertex_costs` for the cost colouring.
+## 停车行为与迁移
+
+适配器默认以 30 Hz 输出。启动时、输入超时、时间戳失效、坐标系不匹配或出现
+非有限速度时，输出零速度；下一条有效输入可恢复输出。超时既检查单调时钟下的
+接收间隔，也检查原始消息时间戳，重复发布不会延长指令有效期。通信两端需时间同步。
+正常关闭时尽力发送零速度，进程强制退出或链路断开由底盘驱动自己的超时机制处理。
+取消导航由协调器请求 MBF 停止执行；适配器不订阅 action 状态，仅处理速度流。
+
+本次移除了多导航来源选择、真值定位、模型生成、桥接、旧启动检查和主动驻停纠偏。
+旧 `meshnav_pb_sim.launch.py` 由 `meshnav_real.launch.py` 替代；旧 profile 参数不再读取。
+`meshnav_topic` 改为 `input_topic`，默认底盘输出改为 `/base/cmd_vel`；
+`control_source`、`hold_*`、`truth_*` 等旧参数已取消。原 PB 末端控制插件参数文件
+也已移出本包；若另选控制插件，应把其参数放到自己的完整导航 YAML。
+
+如果此前安装过旧版本，普通增量安装可能遗留旧入口和资源。使用独立 install
+前缀，或在确认采用默认 isolated 安装布局后，仅清理本包的
+`build/pb_vehicle_adapter` 与 `install/pb_vehicle_adapter` 再构建，避免误启动旧入口。

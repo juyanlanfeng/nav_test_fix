@@ -1,1 +1,1 @@
-"""PB2025 simulation adaptation nodes."""
+"""MeshNav 实车导航协调与速度接口。"""

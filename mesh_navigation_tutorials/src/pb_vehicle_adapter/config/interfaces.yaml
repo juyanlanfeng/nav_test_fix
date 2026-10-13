@@ -1,0 +1,49 @@
+# 实车接口配置。修改名称后重启；节点名用于匹配参数块，请保留这些根键。
+# 本包启动文件强制所有启动的节点使用系统时间，不依赖 /clock。
+
+meshnav_navigator:
+  ros__parameters:
+    use_sim_time: false
+    goal_topic: /rviz/goal_pose            # geometry_msgs/PoseStamped；目标需与地图坐标系一致。
+    get_path_action: /move_base_flex/get_path
+    exe_path_action: /move_base_flex/exe_path
+    check_path_service: /move_base_flex/check_path_cost
+    planner: mesh_planner                 # MBF 配置中的规划器实例名。
+    controller: mesh_controller           # MBF 配置中的控制器实例名。
+    planner_frequency: 2.0                 # 剩余路线检查频率，Hz；0 表示只规划一次。
+    pose_timeout: 2.0                      # MBF 位姿反馈超时，秒。
+    path_progress_window: 2.0              # 沿旧路搜索连接点的距离，米。
+    action_timeout: 15.0                   # 规划、检查及 action 接收超时，秒。
+    replan_patience: 15.0                  # 受阻后停车重规划的最长时间，秒。
+    replan_retry_period: 0.5               # 重规划重试间隔，秒。
+    # 状态为 ~/status（std_msgs/String，JSON）；取消为 ~/cancel（std_srvs/Trigger）。
+
+pb_cmd_vel_adapter:
+  ros__parameters:
+    use_sim_time: false
+    input_topic: /cmd_vel                  # MBF -> 本节点，geometry_msgs/TwistStamped。
+    output_topic: /base/cmd_vel            # 本节点 -> 实车驱动，geometry_msgs/Twist。
+    base_frame: base_footprint             # 严格检查输入 header.frame_id，不执行 TF 变换。
+    timeout_s: 0.5                         # 未收到新有效命令超过此时长，持续发零速度。
+    max_stamp_age_s: 0.5                   # 指令时间戳最大年龄，秒；每次输出都会复查。
+    future_tolerance_s: 0.05               # 允许的未来时间偏差，秒。
+    publish_frequency_hz: 30.0             # 输出频率，Hz。六个速度分量原样传递。
+    # 输入与输出必须是不同话题；参数仅允许在启动时配置。
+
+# 仅在启动参数 navigation_params_file 非空、由本入口启动 MBF 时生效。
+# 完整地图、规划器、控制器和障碍层参数来自你提供的导航 YAML；此段最后覆盖接口。
+move_base_flex:
+  ros__parameters:
+    use_sim_time: false
+    global_frame: map
+    robot_frame: base_footprint            # 与上面的 base_frame 一致。
+    odom_topic: /odom                      # 外部提供 nav_msgs/Odometry，含实际运动速度。
+    force_stop_at_goal: true
+
+# 由 RViz 启动代码读取并转换为话题 remapping；不启动传感器或 URDF 发布器。
+# Fixed Frame 使用上方 global_frame，Mesh Goal 使用 goal_topic。
+meshnav_rviz:
+  ros__parameters:
+    cloud_topic: /cloud_registered
+    obstacle_topic: /dynamic_obstacles
+    robot_description_topic: /robot_description

@@ -18,7 +18,7 @@ from geometry_msgs.msg import PoseStamped  # 接收目标与控制器反馈的�
 from mbf_msgs.action import ExePath, GetPath  # MBF 的路径执行和全局规划 action。
 from mbf_msgs.srv import CheckPath  # 检查当前路径是否仍可通行的服务。
 from rclpy.action import ActionClient  # 向 MBF 发送异步 action 目标。
-from rclpy.clock import Clock, ClockType  # 定时器使用不会受仿真时间暂停影响的稳态时钟。
+from rclpy.clock import Clock, ClockType  # 定时器使用稳态时钟，避免系统时钟调整影响超时。
 from rclpy.node import Node  # ROS 2 节点基类。
 from rclpy.qos import DurabilityPolicy, QoSProfile  # 让迟加入的订阅者读到最近一条状态。
 from std_msgs.msg import String  # 状态消息载体。
