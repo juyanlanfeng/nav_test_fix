@@ -25,42 +25,6 @@ from rclpy.action.graph import get_action_names_and_types
 from rclpy.node import Node
 import tf2_ros
 
-
-DDDMR_MAP_DIR = Path("/home/rainple/nav_test/field/converted_rmuc2026/dddmr_nav")
-
-FRAMEWORKS = {
-    "meshnav": {
-        "topics": ["/odom", "/tf"],
-        "actions": ["/move_base_flex/get_path", "/move_base_flex/exe_path"],
-        "nodes": ["move_base_flex"],
-        "control_source": "meshnav",
-        "velocity_topic": "/cmd_vel",
-    },
-    "jie": {
-        "topics": ["/odom", "/tf", "/planned_path"],
-        "actions": [],
-        "nodes": ["jie_path_node", "d1_controller"],
-        "control_source": "jie",
-        "velocity_topic": "/cmd_vel_jie",
-    },
-    "dddmr": {
-        "topics": ["/odom", "/tf", "/dddmr/mapcloud", "/dddmr/mapground"],
-        "actions": ["/p2p_move_base"],
-        # These are the node names the two DDDMR executables really create
-        # (global_planner_node and p2p_move_base_node); there is no node called
-        # p2p_move_base_node.
-        "nodes": ["global_planner", "perception_3d_global", "p2p_move_base", "perception_3d_local"],
-        "control_source": "dddmr",
-        "velocity_topic": "/pb/dddmr_cmd_vel_stamped",
-        "map_files": [
-            DDDMR_MAP_DIR / "rmuc2026_mapcloud.pcd",
-            DDDMR_MAP_DIR / "rmuc2026_mapground.pcd",
-            DDDMR_MAP_DIR / "map_manifest.yaml",
-        ],
-    },
-}
-
-
 class Preflight(Node):
     def __init__(self):
         super().__init__("pb_preflight")
@@ -217,7 +181,13 @@ def main():
     parser.add_argument("--poll-interval", type=float, default=2.0)
     args = parser.parse_args()
 
-    spec = FRAMEWORKS[args.framework]
+    spec = {
+        "topics": ["/odom", "/tf"],
+        "actions": ["/move_base_flex/get_path", "/move_base_flex/exe_path"],
+        "nodes": ["move_base_flex"],
+        "control_source": "meshnav",
+        "velocity_topic": "/cmd_vel",
+    },
     rclpy.init()
     node = Preflight()
     try:

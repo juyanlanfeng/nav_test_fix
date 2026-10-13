@@ -16,14 +16,14 @@
 obstacle_sub:
   ros__parameters:
     # --- 点云输入与输出 ---
-    input_cloud_topic: '/cloud'
+    input_cloud_topic: '/cloud_registered'
     # 去畸变后的单帧 sensor_msgs/PointCloud2；点坐标属于 lidar_frame。
 
     output_cloud_topic: '/dynamic_obstacles'
     # 背景差分后变换回 base_frame 的障碍点云，保留原始采样时间。
 
     # --- 固定背景与差分 ---
-    pcd_file_path: '/home/rainple/nav_test/field/pcd/rmuc2026_field.pcd'
+    pcd_file_path: '/home/rainple/nav_test/maps/pcd/2.pcd'
     # 当前 Gazebo 场地的静态背景 PCD，采用绝对路径；更换设备或地图时修改此项。
     # 背景点坐标必须已与 odom_frame 对齐，单纯修改坐标系名称不会进行地图配准。
 

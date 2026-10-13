@@ -1,201 +1,74 @@
 """Start PB simulation and MeshNav from their respective YAML files."""
-
-import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     ExecuteProcess,
-    GroupAction,
     IncludeLaunchDescription,
-    SetEnvironmentVariable,
     TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, EnvironmentVariable, FindExecutable
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 import yaml
 
-from pb_vehicle_adapter.profile import default_profile_path, load_profile
-
-
 def generate_launch_description():
-    profile_path = default_profile_path()
-    params = load_profile(profile_path)
 
+    # [SIM/COMMON] 获取已安装功能包的 share 目录，不是直接使用 src 目录。
+    # sim_share、gz_share 是仿真专用；mesh_share 提供可复用的导航配置。
+    # 注意：这些查找发生在启动条件判断之前。因此 start_sim=False 仍要求
+    # mesh_navigation_tutorials_sim、ros_gz_sim 可被找到，不能当作实车入口。
     pb_share = get_package_share_directory("pb_vehicle_adapter")
     sim_share = get_package_share_directory("mesh_navigation_tutorials_sim")
     mesh_share = get_package_share_directory("mesh_navigation_tutorials")
     gz_share = get_package_share_directory("ros_gz_sim")
     with open(os.path.join(mesh_share, "config", "mbf_mesh_nav.yaml"), encoding="utf-8") as stream:
         nav_config = yaml.safe_load(stream)
+    # meshnav_launch 是供本 launch 读取的配置块，不会因此生成同名 ROS 节点。
+    # move_base_flex 是导航服务器的参数块；其插件与地图参数由后面的子 launch 加载。
     nav_options = nav_config["meshnav_launch"]["ros__parameters"]
     nav_params = nav_config["move_base_flex"]["ros__parameters"]
 
-    # Gazebo 模型、插件搜索路径。
-    resource_path = [
-        os.path.join(sim_share, "models"),
-        ":",
-        os.path.join(params["pb_robot_description_root"], "resource", "models"),
-        ":",
-        os.path.join(params["pb_resources_root"], "resource", "models"),
-        ":",
-        EnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", default_value=""),
-    ]
-    plugin_path = [
-        params["pb_plugin_path"],
-        ":",
-        EnvironmentVariable("IGN_GAZEBO_SYSTEM_PLUGIN_PATH", default_value=""),
-    ]
-
-    # Gazebo 世界。
-    world_file = os.path.join(sim_share, "worlds", str(params["world_name"]) + ".sdf")
-    gz_args = "-r " + world_file
-    if str(params["start_gazebo_gui"]).lower() != "true":
-        gz_args += " -s"
-    gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(gz_share, "launch", "gz_sim.launch.py")),
-        launch_arguments={"gz_args": gz_args}.items(),
-    )
-
-    # 根据 YAML 选择带渲染传感器或不带渲染传感器的车辆模型。
-    model_file = os.path.join(pb_share, "models", "pb_navigation_robot.sdf")
-    model_script = os.path.join(pb_share, "tools", "reduced_robot_model.py")
-    model_command = [FindExecutable(name="python3"), " ", model_script, " ", model_file]
-    model_options = [
-        " --diagnostics ", str(params["contact_diagnostics"]),
-        " --drive ", str(params["drive_model"]),
-    ]
-    reduced_model = Command(model_command + model_options)
-    full_model = Command(model_command + [" --rendering True"] + model_options)
-    spawn_args = [
-        "-name", "robot",
-        "-x", str(params["spawn_x"]),
-        "-y", str(params["spawn_y"]),
-        "-z", str(params["spawn_z"]),
-        "-Y", str(math.radians(float(params["spawn_yaw_deg"]))),
-    ]
-    spawn = Node(
-        package="ros_gz_sim",
-        executable="create",
-        name="spawn_pb_navigation_robot",
-        output="screen",
-        arguments=["-string", full_model] + spawn_args,
-        parameters=[{"use_sim_time": params["use_sim_time"]}],
-        condition=IfCondition(str(params["spawn_rendering_sensors"])),
-    )
-    spawn_without_sensors = Node(
-        package="ros_gz_sim",
-        executable="create",
-        name="spawn_pb_navigation_robot",
-        output="screen",
-        arguments=["-string", reduced_model] + spawn_args,
-        parameters=[{"use_sim_time": params["use_sim_time"]}],
-        condition=UnlessCondition(str(params["spawn_rendering_sensors"])),
-    )
-
-    # 仿真时钟、机器人状态、里程计和速度适配器。
-    bridge = Node(
-        package="ros_gz_bridge",
-        executable="parameter_bridge",
-        name="pb_ros_gz_bridge",
-        output="screen",
-        parameters=[{
-            "config_file": os.path.join(pb_share, "config", params["bridge_config_file"]),
-        }],
-    )
-    state_publisher = Node(
-        package="robot_state_publisher",
-        executable="robot_state_publisher",
-        name="pb_robot_state_publisher",
-        output="screen",
-        remappings=[("robot_description", "/meshnav/robot_description")],
-        parameters=[{
-            "use_sim_time": params["use_sim_time"],
-            "publish_frequency": params["robot_state_publish_frequency"],
-            "robot_description": ParameterValue(
-                Command([
-                    FindExecutable(name="cat"), " ",
-                    os.path.join(pb_share, "urdf", "pb_navigation_robot.urdf"),
-                ]),
-                value_type=str,
-            ),
-        }],
-    )
-    truth = Node(
-        package="pb_vehicle_adapter",
-        executable="pb_ground_truth_adapter",
-        name="pb_ground_truth_adapter",
-        output="screen",
-        parameters=[{
-            "use_sim_time": params["use_sim_time"],
-            "truth_topic": params["truth_topic"],
-            "health_topic": params["health_topic"],
-            "base_to_chassis_xyz": [float(v) for v in params["base_to_chassis_xyz"]],
-            "base_to_chassis_xyzw": [float(v) for v in params["base_to_chassis_xyzw"]],
-        }],
-    )
+    # [COMMON，当前输出接 SIM] 速度适配器选择 control_source 指定的来源。
+    # 默认 MeshNav 输入 /cmd_vel 为 TwistStamped，输出 /pb/cmd_vel_safe 为 Twist；
+    # 节点负责命令时效检查、周期输出和超时处理，本 launch 没有覆盖这些话题。
+    # hold_enabled=True 时，还读取 hold_pose_topic（默认 /odom）及 ExePath 状态，
+    # 执行任务结束后的驻车保持；实车是否启用需结合真实里程计与底盘能力决定。
+    # [REAL] 可复用或替换为实车速度网关，但要显式配置输入/输出话题、时间、
+    # 坐标系和限速策略；输出应交给实际底盘驱动。本节点不实现串口/CAN 通信。
     velocity = Node(
         package="pb_vehicle_adapter",
         executable="pb_cmd_vel_adapter",
         name="pb_cmd_vel_adapter",
         output="screen",
         parameters=[{
-            "use_sim_time": params["use_sim_time"],
-            "control_source": params["control_source"],
-            "hold_enabled": params["hold_enabled"],
-            "hold_pose_topic": params["hold_pose_topic"],
-            "hold_gain": params["hold_gain"],
-            "hold_max_linear_velocity": params["hold_max_linear_velocity"],
-            "hold_max_angular_velocity": params["hold_max_angular_velocity"],
-            "hold_angular_deadband": params["hold_angular_deadband"],
+            "use_sim_time": False,
+            "control_source": "meshnav",
+            "hold_enabled": True,
+            "hold_pose_topic": "/odom",
+            "hold_gain": 1.0,
+            "hold_max_linear_velocity": 0.1,
+            "hold_max_angular_velocity": 0.2,
+            "hold_angular_deadband": 0.02,
         }],
     )
 
-    # start_sim=False 时沿用已运行的仿真，只切换底盘的速度来源。
-    simulation = GroupAction(
-        actions=[
-            SetEnvironmentVariable("IGN_GAZEBO_RESOURCE_PATH", resource_path),
-            SetEnvironmentVariable("IGN_GAZEBO_SYSTEM_PLUGIN_PATH", plugin_path),
-            SetEnvironmentVariable("GZ_SIM_SYSTEM_PLUGIN_PATH", plugin_path),
-            gazebo,
-            bridge,
-            spawn,
-            spawn_without_sensors,
-            state_publisher,
-            truth,
-            velocity,
-        ],
-        condition=IfCondition(str(params["start_sim"])),
-        scoped=True,
-    )
-    source_switch = ExecuteProcess(
-        cmd=[
-            "ros2", "param", "set", "/pb_cmd_vel_adapter", "control_source",
-            str(params["control_source"]),
-        ],
-        output="screen",
-        condition=UnlessCondition(str(params["start_sim"])),
-    )
-
-    # 导航启动选项和 MBF 节点参数统一来自 mbf_mesh_nav.yaml。
-    need_rmcl = (
-        str(params["spawn_rendering_sensors"]).lower() == "true"
-        and (nav_options["localization"] == "rmcl_micpl"
-             or nav_options["obstacle_segmentation"] == "rmcl_seg")
-    )
-    rmcl = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(mesh_share, "launch", "rmcl_launch.py")),
-        condition=IfCondition(str(need_rmcl)),
-    )
+    # [COMMON] 启动导航服务器 move_base_flex，由 MBF 子 launch 读取导航 YAML。
+    # 同一服务器中加载 MeshMap、地图层、规划器和控制器插件；这些不是各自
+    # 单独启动的 ROS 节点。当前配置选择 CVP + MeshController，没有使用 MPPI。
+    # 子 launch 将 /move_base_flex/cmd_vel 重映射到 /cmd_vel（TwistStamped）。
+    # [REAL] 可复用这些导航包，须提供真实 /odom、定位 TF、PLY 地图和障碍输入，
+    # 配置真实车体、运动能力、可写 H5 缓存路径，并将 use_sim_time 设为 false。
+    # 地图由 Blender 制作不影响这里对 LVR2 运行时网格库的依赖。
     meshnav = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             mesh_share, "launch", "mbf_mesh_navigation_server_launch.py",
         )),
     )
+    # [COMMON，可选 UI] RViz 显示地图、路径、点云和 TF，可用于仿真或实车。
+    # 此处选择 PB RViz 配置；目标工具的话题需要与 navigator.goal_topic 对应。
+    # [REAL] 可在操作电脑上运行，机器人无需打开 GUI；同时调整显示话题和 frame。
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -205,6 +78,14 @@ def generate_launch_description():
         parameters=[{"use_sim_time": nav_params["use_sim_time"]}],
         condition=IfCondition(str(nav_options["start_rviz"])),
     )
+    # [COMMON] 导航协调节点：默认订阅 /rviz/goal_pose（PoseStamped），
+    # 调用 MBF /move_base_flex/get_path（GetPath）和 /exe_path（ExePath），
+    # 按 planner_frequency 检查剩余路线代价，受阻时协调重新规划与执行。
+    # 同时提供 /meshnav_navigator/status 和 /meshnav_navigator/cancel。
+    # planner/controller 是 YAML 中的插件实例名，不是新建节点名。
+    # 这里不直接控制电机，不提供定位，也不执行点云分割。
+    # [REAL] 可保留；确认目标位姿处于导航地图坐标系，且 action/service 名称一致。
+    # 加载整个 YAML 时，按节点名匹配参数块，其他节点的配置不会全部注入该节点。
     navigator = Node(
         package="pb_vehicle_adapter",
         executable="meshnav_navigator",
@@ -218,7 +99,11 @@ def generate_launch_description():
         }],
     )
 
-    # 启动 2 秒后运行就绪检查；检查不会阻塞上面的节点启动。
+    # --wait-timeout 是检查重试超时，不是延后启动导航节点的等待时间。
+    # 它检查推进中的 /clock、TF、节点/action 和 PB 速度来源等仿真条件；
+    # 只读检查不发送导航目标或速度，也不会作为上面节点的启动屏障。
+    # 检查进程退出失败不会自动停止此前启动的节点，本文件未配置这种联动。
+    # [REAL] 应换为真实定位、传感器、TF 和底盘接口的检查，不能要求 /clock 推进。
     startup_check = TimerAction(
         period=2.0,
         actions=[ExecuteProcess(
@@ -231,12 +116,15 @@ def generate_launch_description():
         )],
     )
 
+    # 启动组织顺序：仿真分组 -> 可选 RMCL -> 既有适配器来源切换 -> MBF
+    # -> 导航协调 -> 可选 RViz -> 延迟检查。条件不满足的动作会跳过。
+    # 这是 launch 动作的列举顺序；各进程异步运行，不保证按此顺序完成初始化。
+    # 真正发起一次导航还需要目标消息，以及已可用的地图、TF、里程计、
+    # 所选障碍输入和底盘命令接口；创建这些动作本身不等于接口已就绪。
     return LaunchDescription([
-        simulation,
-        rmcl,
-        source_switch,
         meshnav,
         navigator,
         rviz,
         startup_check,
+        velocity,
     ])

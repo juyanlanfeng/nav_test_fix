@@ -1,3 +1,0 @@
-# Every repository listed here will get cloned and built during CI runs.
-# Use this for repositories that cannot be installed via rosdep.
-repositories:
