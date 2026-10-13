@@ -4,13 +4,13 @@
 /**:
   ros__parameters:
     # --- 共享配置：仅影响加载本文件的节点 ---
-    use_sim_time: true
+    use_sim_time: false
     # 使用 Gazebo 的 /clock；实车或没有 /clock 的独立运行设为 false。
 
     base_frame: 'base_footprint'
     # 车体参考坐标系；通常应与输入里程计的 child_frame_id 一致。
 
-    lidar_frame: 'front_mid360'
+    lidar_frame: 'lidar_link'
     # 单帧雷达点云的坐标系，必须与输入点云的 header.frame_id 一致。
 
 obstacle_sub:
@@ -23,7 +23,7 @@ obstacle_sub:
     # 背景差分后变换回 base_frame 的障碍点云，保留原始采样时间。
 
     # --- 固定背景与差分 ---
-    pcd_file_path: '/home/rainple/nav_test/maps/pcd/2.pcd'
+    pcd_file_path: '/home/rm/nav_test_fix/mesh_navigation_tutorials/maps/pcd/2.pcd'
     # 当前 Gazebo 场地的静态背景 PCD，采用绝对路径；更换设备或地图时修改此项。
     # 背景点坐标必须已与 odom_frame 对齐，单纯修改坐标系名称不会进行地图配准。
 
@@ -42,7 +42,7 @@ obstacle_sub:
 cloud_tf_publisher:
   ros__parameters:
     # --- 里程计输入 ---
-    odom_topic: '/odom'
+    odom_topic: '/Odometry_transformed'
     # nav_msgs/Odometry 输入；按消息的父子坐标系、测量时间和 pose 广播动态 TF。
     # 里程计应与背景使用同一参考坐标，并为共享 base_frame 提供位姿。
 
