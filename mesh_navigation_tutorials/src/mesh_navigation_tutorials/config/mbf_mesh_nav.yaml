@@ -241,7 +241,7 @@ move_base_flex:
                                    # 正值启用 STVL a*t³/6 加速，不能代替遮挡/自由空间检测。
         max_observation_age: 0.30    # 超龄、重复、乱序帧均不修改历史 [s]；超龄日志提示检查上游积压。
 
-        sensor_frame: 'front_mid360'
+        sensor_frame: 'base_link'
         sensor_offset_xyz: [0.0, 0.0, 0.03]  # 雷达 link 到测量原点的局部偏移 [m]。
         min_sensor_range: 0.10
         horizontal_fov_deg: 360.0
