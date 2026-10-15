@@ -44,9 +44,7 @@ private:
     sensor_msgs::msg::PointCloud2 current_cloud_odom_;
 
     geometry_msgs::msg::TransformStamped odom_to_lidar_;
-    geometry_msgs::msg::TransformStamped footprint_to_lidar_;
-    geometry_msgs::msg::TransformStamped lidar_to_odom_;
-    geometry_msgs::msg::TransformStamped odom_to_lidar_;
+    geometry_msgs::msg::TransformStamped lidar_to_footprint_;
 
     pcl::search::Search<pcl::PointXYZ>::Ptr background_tree_;
 
@@ -106,11 +104,11 @@ public:
         try {
             // 目标系在前、源系在后；使用点云消息中的采样时间查询。
             odom_to_lidar_ = tf_buffer_->lookupTransform(
-                odom_frame_, base_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
+                lidar_frame_, odom_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
               );
 
-            footprint_to_lidar_ = tf_buffer_->lookupTransform(
-                lidar_frame_, base_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
+            lidar_to_footprint_ = tf_buffer_->lookupTransform(
+                base_frame_, lidar_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
               );
         }
         catch(const std::exception& e) {
@@ -118,14 +116,14 @@ public:
             return;
         }
 
-        // 计算odom->lidar
-        tf2::Transform T_odom_footprint;
-        tf2::Transform T_footprint_lidar;
+        // 计算odom->basefootprint
+        tf2::Transform T_odom_lidar;
+        tf2::Transform T_lidar_footprint;
 
-        tf2::fromMsg(odom_to_lidar_.transform, T_odom_footprint);
-        T_odom_footprint.inverse();
-        tf2::fromMsg(footprint_to_lidar_.transform, T_footprint_lidar);
-        tf2::Transform T_odom_lidar = (T_footprint_lidar * T_odom_footprint).inverse();
+        tf2::fromMsg(odom_to_lidar_.transform, T_odom_lidar);
+        tf2::fromMsg(lidar_to_footprint_.transform, T_lidar_footprint);
+        
+        tf2::Transform T_odom_footprint = T_lidar_footprint * T_odom_lidar;
 
         // // --- gazebo发布的tf与点云中心存在偏差,这里直接强制纠正,后面需要去除 ---
         // // Gazebo 测量原点相对雷达 link，沿局部 Z 轴偏移 +0.03 m。
@@ -136,12 +134,13 @@ public:
         // T_odom_lidar = T_odom_lidar * T_lidar_sensor;
         // // ----------------------------------------------------------------------
 
-        lidar_to_odom_.header.stamp = msg->header.stamp;
-        lidar_to_odom_.header.frame_id = odom_frame_;
-        lidar_to_odom_.child_frame_id = lidar_frame_;
-        lidar_to_odom_.transform = tf2::toMsg(T_odom_lidar);
-
         // 将点云从“sensor”也就是点云中心变换到odom
+        geometry_msgs::msg::TransformStamped lidar_to_odom_;
+        lidar_to_odom_.header.stamp = msg->header.stamp;
+        lidar_to_odom_.header.frame_id = odom_frame_; // 目标系
+        lidar_to_odom_.child_frame_id = lidar_frame_; // 源系
+        lidar_to_odom_.transform = tf2::toMsg(T_odom_lidar.inverse());
+
         tf2::doTransform(*msg, current_cloud_odom_, lidar_to_odom_);
 
         // 将 odom 坐标系下的当前单帧点云转为 PCL。
