@@ -43,7 +43,7 @@ private:
     // 转换后的pointcloud2类型点云
     sensor_msgs::msg::PointCloud2 current_cloud_odom_;
 
-    geometry_msgs::msg::TransformStamped odom_to_footprint_;
+    geometry_msgs::msg::TransformStamped odom_to_lidar_;
     geometry_msgs::msg::TransformStamped footprint_to_lidar_;
     geometry_msgs::msg::TransformStamped lidar_to_odom_;
     geometry_msgs::msg::TransformStamped odom_to_lidar_;
@@ -105,8 +105,8 @@ public:
 
         try {
             // 目标系在前、源系在后；使用点云消息中的采样时间查询。
-            odom_to_footprint_ = tf_buffer_->lookupTransform(
-                base_frame_, odom_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
+            odom_to_lidar_ = tf_buffer_->lookupTransform(
+                odom_frame_, base_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
               );
 
             footprint_to_lidar_ = tf_buffer_->lookupTransform(
@@ -122,7 +122,8 @@ public:
         tf2::Transform T_odom_footprint;
         tf2::Transform T_footprint_lidar;
 
-        tf2::fromMsg(odom_to_footprint_.transform, T_odom_footprint);
+        tf2::fromMsg(odom_to_lidar_.transform, T_odom_footprint);
+        T_odom_footprint.inverse();
         tf2::fromMsg(footprint_to_lidar_.transform, T_footprint_lidar);
         tf2::Transform T_odom_lidar = (T_footprint_lidar * T_odom_footprint).inverse();
 

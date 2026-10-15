@@ -68,7 +68,7 @@ move_base_flex:
                                  # 换掉它，所有目标坐标的含义都会跟着变。
     robot_frame: 'base_footprint'  # 车体坐标系（贴地投影）。规划器用它查询机器人位姿。
     # 来自TfTransformer，后面需要单独启动
-    odom_topic: '/Odometry_transformed'           # 里程计话题；MBF 由它拿机器人速度（速度长期为 0 会
+    odom_topic: '/Odometry'           # 里程计话题；MBF 由它拿机器人速度（速度长期为 0 会
                                  # 触发下面的 cmd_vel_ignored_tolerance）。
 
     # ---- 时间与到达前后行为 -------------------------------------------------
