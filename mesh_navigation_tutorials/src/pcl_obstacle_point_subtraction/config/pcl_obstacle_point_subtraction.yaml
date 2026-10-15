@@ -5,6 +5,7 @@
   ros__parameters:
     # --- 共享配置：仅影响加载本文件的节点 ---
     use_sim_time: false
+    use_sim_time: false
     # 使用 Gazebo 的 /clock；实车或没有 /clock 的独立运行设为 false。
 
     base_frame: 'base_footprint'
@@ -42,6 +43,7 @@ obstacle_sub:
 cloud_tf_publisher:
   ros__parameters:
     # --- 里程计输入 ---
+    odom_topic: '/Odometry_transformed'
     odom_topic: '/Odometry_transformed'
     # nav_msgs/Odometry 输入；按消息的父子坐标系、测量时间和 pose 广播动态 TF。
     # 里程计应与背景使用同一参考坐标，并为共享 base_frame 提供位姿。

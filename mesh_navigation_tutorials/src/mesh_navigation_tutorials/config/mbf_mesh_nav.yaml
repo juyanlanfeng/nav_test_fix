@@ -45,6 +45,7 @@
 meshnav_launch:
   ros__parameters:
     map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
+    map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
     start_rviz: 'True'               # 是否打开导航 RViz。
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
 
@@ -124,9 +125,11 @@ move_base_flex:
     mesh_map:
       # ---- 输入与缓存 -------------------------------------------------------
       mesh_file: '/home/rm/nav_test_fix/mesh_navigation_tutorials/maps/ply/scanned_map.ply'
+      mesh_file: '/home/rm/nav_test_fix/mesh_navigation_tutorials/maps/ply/scanned_map.ply'
       #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
+      mesh_working_file: '/home/rm/nav_test_fix/mesh_navigation_tutorials/cache/mesh_nav.h5'
       mesh_working_file: '/home/rm/nav_test_fix/mesh_navigation_tutorials/cache/mesh_nav.h5'
       #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
       #     mesh_map_working_path 覆盖。它只是缓存，不是源地图；
