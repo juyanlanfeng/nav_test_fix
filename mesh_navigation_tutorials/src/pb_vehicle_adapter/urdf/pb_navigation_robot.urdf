@@ -53,7 +53,7 @@
 		</inertial>
 		<visual>
 			<geometry>
-				<mesh filename="file:///home/rainple/nav_test/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_left.dae"/>
+				<mesh filename="file:///home/rainple/nav_test_fix/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_left.dae"/>
 			</geometry>
 		</visual>
 		<collision>
@@ -79,7 +79,7 @@
 		</inertial>
 		<visual>
 			<geometry>
-				<mesh filename="file:///home/rainple/nav_test/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_right.dae"/>
+				<mesh filename="file:///home/rainple/nav_test_fix/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_right.dae"/>
 			</geometry>
 		</visual>
 		<collision>
@@ -105,7 +105,7 @@
 		</inertial>
 		<visual>
 			<geometry>
-				<mesh filename="file:///home/rainple/nav_test/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_right.dae"/>
+				<mesh filename="file:///home/rainple/nav_test_fix/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_right.dae"/>
 			</geometry>
 		</visual>
 		<collision>
@@ -131,7 +131,7 @@
 		</inertial>
 		<visual>
 			<geometry>
-				<mesh filename="file:///home/rainple/nav_test/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_left.dae"/>
+				<mesh filename="file:///home/rainple/nav_test_fix/third_party/pb2025_sources/rmoss_gz_resources/resource/models/rmua19_standard_robot/meshes/wheel_left.dae"/>
 			</geometry>
 		</visual>
 		<collision>

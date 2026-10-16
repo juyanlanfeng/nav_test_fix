@@ -11,11 +11,11 @@ pb_vehicle:
 
     # --- PB 资源位置 ---------------------------------------------------------
     # 机器人模型资源目录。
-    pb_robot_description_root: "/home/rainple/nav_test/third_party/pb2025_sources/pb2025_robot_description"
+    pb_robot_description_root: "/home/rainple/nav_test_fix/third_party/pb2025_sources/pb2025_robot_description"
     # Gazebo 公共模型目录。
-    pb_resources_root: "/home/rainple/nav_test/third_party/pb2025_sources/rmoss_gz_resources"
+    pb_resources_root: "/home/rainple/nav_test_fix/third_party/pb2025_sources/rmoss_gz_resources"
     # Gazebo 底盘与灯条插件目录。
-    pb_plugin_path: "/home/rainple/nav_test/third_party/pb2025_install/rmoss_gz_plugins/plugins"
+    pb_plugin_path: "/home/rainple/nav_test_fix/third_party/pb2025_install/rmoss_gz_plugins/plugins"
 
     # --- 车辆生成与传感器 ----------------------------------------------------
     spawn_x: "-11.9"                  # 机器人初始 X 坐标，米。

@@ -182,12 +182,14 @@ move_base_flex:
 
     mesh_map:
       # ---- 输入与缓存 -------------------------------------------------------
-      mesh_file: '/home/rainple/nav_test/mesh_navigation_tutorials/src/mesh_navigation_tutorials/maps/rmuc2026_field.ply'
+      # mesh_file: '/home/rainple/nav_test/mesh_navigation_tutorials/src/mesh_navigation_tutorials/maps/rmuc2026_field.ply'
+      mesh_file: '/home/rainple/maps/ply/only_ubuntu.ply'
       #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
-      mesh_working_file: '/home/rainple/nav_test/mesh_navigation_tutorials/rmuc2026_field.h5'
-      #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
+      mesh_working_file: ''
+      #   ↑ 留空时在所选 PLY 同目录生成同名 .h5，避免更换地图后沿用旧场地缓存路径。
+      #     工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
       #     mesh_map_working_path 覆盖。它只是缓存，不是源地图；
       #     参数或 PLY 一变就必须重算（见文件头《缓存失效规则》）。
       mesh_working_part: 'mesh'
