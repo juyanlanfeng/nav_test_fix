@@ -27,6 +27,7 @@ private:
     // 配置值统一由 launch 加载的 YAML 提供，CPP 中只保留成员及参数类型。
     double distance_threshold_;
     double robot_radius_;
+    double horizon_;
     std::string static_pcd_file_;
     std::string input_topic_;
     std::string output_topic_;
@@ -39,14 +40,12 @@ private:
     // 动态障碍物点云
     pcl::PointCloud<pcl::PointXYZ>::Ptr obstacle_cloud_;
     // 转换后的PCL类型点云
-    pcl::PointCloud<pcl::PointXYZ>::Ptr current_cloud_odom_pcl_;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr current_cloud_pcl_;
     // 转换后的pointcloud2类型点云
     sensor_msgs::msg::PointCloud2 current_cloud_odom_;
 
-    geometry_msgs::msg::TransformStamped odom_to_footprint_;
-    geometry_msgs::msg::TransformStamped footprint_to_lidar_;
-    geometry_msgs::msg::TransformStamped lidar_to_odom_;
     geometry_msgs::msg::TransformStamped odom_to_lidar_;
+    geometry_msgs::msg::TransformStamped lidar_to_footprint_;
 
     pcl::search::Search<pcl::PointXYZ>::Ptr background_tree_;
 
@@ -62,6 +61,7 @@ public:
         lidar_frame_ = this->declare_parameter<std::string>("lidar_frame");
         odom_frame_ = this->declare_parameter<std::string>("odom_frame");
         robot_radius_ = this->declare_parameter<double>("robot_radius");
+        horizon_ = this->declare_parameter<double>("horizon");
 
         this->tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         this->tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
@@ -78,7 +78,7 @@ public:
 
         // 初始化动态障碍物点云
         obstacle_cloud_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
-        current_cloud_odom_pcl_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
+        current_cloud_pcl_ = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
 
         // 只排队最新扫描；保留采样时间，避免积压点云被下游新鲜度检查拒收。
         cloud_subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -105,26 +105,33 @@ public:
 
         try {
             // 目标系在前、源系在后；使用点云消息中的采样时间查询。
-            odom_to_footprint_ = tf_buffer_->lookupTransform(
-                base_frame_, odom_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
-              );
-
-            footprint_to_lidar_ = tf_buffer_->lookupTransform(
-                lidar_frame_, base_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
+            odom_to_lidar_ = tf_buffer_->lookupTransform(
+                lidar_frame_, odom_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
               );
         }
         catch(const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "未查找到TF信息");
+            RCLCPP_WARN(this->get_logger(), "未查找到TF信息%s -> %s", odom_frame_.c_str(), lidar_frame_.c_str());
             return;
         }
 
-        // 计算odom->lidar
-        tf2::Transform T_odom_footprint;
-        tf2::Transform T_footprint_lidar;
+        try{
+            lidar_to_footprint_ = tf_buffer_->lookupTransform(
+                base_frame_, lidar_frame_, rclcpp::Time(msg->header.stamp, this->get_clock()->get_clock_type()), rclcpp::Duration::from_seconds(0.05)
+              );
+        }
+        catch(const std::exception& e) {
+            RCLCPP_WARN(this->get_logger(), "未查找到TF信息%s -> %s", lidar_frame_.c_str(), base_frame_.c_str());
+            return;
+        }
 
-        tf2::fromMsg(odom_to_footprint_.transform, T_odom_footprint);
-        tf2::fromMsg(footprint_to_lidar_.transform, T_footprint_lidar);
-        tf2::Transform T_odom_lidar = (T_footprint_lidar * T_odom_footprint).inverse();
+        // 计算odom->basefootprint
+        tf2::Transform T_odom_lidar;
+        tf2::Transform T_lidar_footprint;
+
+        tf2::fromMsg(odom_to_lidar_.transform, T_odom_lidar);
+        tf2::fromMsg(lidar_to_footprint_.transform, T_lidar_footprint);
+        
+        tf2::Transform T_odom_footprint = T_lidar_footprint * T_odom_lidar;
 
         // --- gazebo发布的tf与点云中心存在偏差,这里直接强制纠正,后面需要去除 ---
         // Gazebo 测量原点相对雷达 link，沿局部 Z 轴偏移 +0.03 m。
@@ -135,58 +142,85 @@ public:
         T_odom_lidar = T_odom_lidar * T_lidar_sensor;
         // ----------------------------------------------------------------------
 
-        lidar_to_odom_.header.stamp = msg->header.stamp;
-        lidar_to_odom_.header.frame_id = odom_frame_;
-        lidar_to_odom_.child_frame_id = lidar_frame_;
-        lidar_to_odom_.transform = tf2::toMsg(T_odom_lidar);
+        pcl::fromROSMsg(*msg, *current_cloud_pcl_);
 
-        // 将点云从“sensor”也就是点云中心变换到odom
-        tf2::doTransform(*msg, current_cloud_odom_, lidar_to_odom_);
+        // 点云：lidar->basefootprint
+        auto lidar_to_footprint = tf2::toMsg(T_lidar_footprint);
 
-        // 将 odom 坐标系下的当前单帧点云转为 PCL。
-        pcl::fromROSMsg(current_cloud_odom_, *current_cloud_odom_pcl_);
+        Eigen::Affine3f T_lidar_footprint_matrix = Eigen::Affine3f::Identity();
+        T_lidar_footprint_matrix.translation() = Eigen::Vector3f(
+            lidar_to_footprint.translation.x,
+            lidar_to_footprint.translation.y,
+            lidar_to_footprint.translation.z
+        );
+        T_lidar_footprint_matrix.rotate(Eigen::Quaternionf(
+            lidar_to_footprint.rotation.w,
+            lidar_to_footprint.rotation.x,
+            lidar_to_footprint.rotation.y,
+            lidar_to_footprint.rotation.z
+        ));
+        
+        pcl::PointCloud<pcl::PointXYZ> cloud_in_footprint;
+        pcl::transformPointCloud(*current_cloud_pcl_, cloud_in_footprint, T_lidar_footprint_matrix);
+
+        // 按距离过滤点云
+        pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
+        for (const auto &point : cloud_in_footprint) {
+            float distance = std::hypot(point.x, point.y);
+            if (distance >= robot_radius_ && distance <= horizon_)
+            {
+                filtered_cloud.push_back(point);
+            }
+        }
+
+        // 点云：basefootprint->odom
+        auto footprint_to_odom = tf2::toMsg(T_odom_footprint.inverse());
+
+        Eigen::Affine3f T_footprint_odom_matrix = Eigen::Affine3f::Identity();
+        T_footprint_odom_matrix.translation() = Eigen::Vector3f(
+            footprint_to_odom.translation.x,
+            footprint_to_odom.translation.y,
+            footprint_to_odom.translation.z
+        );
+        T_footprint_odom_matrix.rotate(Eigen::Quaternionf(
+            footprint_to_odom.rotation.w,
+            footprint_to_odom.rotation.x,
+            footprint_to_odom.rotation.y,
+            footprint_to_odom.rotation.z
+        ));
+        
+        pcl::PointCloud<pcl::PointXYZ> filtered_cloud_in_odom;
+        pcl::transformPointCloud(filtered_cloud, filtered_cloud_in_odom, T_footprint_odom_matrix);
 
         // 与 SegmentDifferences 相同的最近邻差分；阈值仍为距离平方。
         if (static_cloud_->empty())
-            *obstacle_cloud_ = *current_cloud_odom_pcl_;
+            *obstacle_cloud_ = filtered_cloud_in_odom;
         else
-            pcl::getPointCloudDifference(*current_cloud_odom_pcl_,
+            pcl::getPointCloudDifference(filtered_cloud_in_odom,
                 distance_threshold_ * distance_threshold_, background_tree_, *obstacle_cloud_);
 
-        // ----------------------- 变回车体系 -----------------------------------
-        // 这里不是原路返回了，而是直接将点云从odom变到footprint
+        // 点云：odom->basefootprint
         // mesh的obstacle_layer中的max_obstacle_dist是以obstacle点云中心来计算的,所以obstacle点云必须变换回车体系
         auto odom_to_footprint = tf2::toMsg(T_odom_footprint);
 
-        Eigen::Affine3f tf_matrix = Eigen::Affine3f::Identity();
-        tf_matrix.translation() = Eigen::Vector3f(
+        Eigen::Affine3f T_odom_footprint_matrix = Eigen::Affine3f::Identity();
+        T_odom_footprint_matrix.translation() = Eigen::Vector3f(
             odom_to_footprint.translation.x,
             odom_to_footprint.translation.y,
             odom_to_footprint.translation.z
         );
-        tf_matrix.rotate(Eigen::Quaternionf(
+        T_odom_footprint_matrix.rotate(Eigen::Quaternionf(
             odom_to_footprint.rotation.w,
             odom_to_footprint.rotation.x,
             odom_to_footprint.rotation.y,
             odom_to_footprint.rotation.z
         ));
         
-        pcl::PointCloud<pcl::PointXYZ> cloud_in_footprint;
-        pcl::transformPointCloud(*obstacle_cloud_, cloud_in_footprint, tf_matrix);
-        // ----------------------------------------------------------------------
-
-        // 滤除车体自身的点云
-        pcl::PointCloud<pcl::PointXYZ> filtered_obstacle_cloud;
-        for (const auto &point : cloud_in_footprint) {
-            float distance = std::hypot(point.x, point.y);
-            if (distance >= robot_radius_)
-            {
-                filtered_obstacle_cloud.push_back(point);
-            }
-        }
+        pcl::PointCloud<pcl::PointXYZ> obstacle_cloud_in_footprint;
+        pcl::transformPointCloud(*obstacle_cloud_, obstacle_cloud_in_footprint, T_odom_footprint_matrix);
 
         sensor_msgs::msg::PointCloud2 obstacle_msg;
-        pcl::toROSMsg(filtered_obstacle_cloud, obstacle_msg);
+        pcl::toROSMsg(obstacle_cloud_in_footprint, obstacle_msg);
         obstacle_msg.header = msg->header; // 保留原单帧点云的采样时间
         obstacle_msg.header.frame_id = base_frame_;
         dynamic_obstacles_publisher_->publish(obstacle_msg);

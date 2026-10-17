@@ -39,6 +39,8 @@ obstacle_sub:
     robot_radius: 0.4
     # 机器人半径，过滤机器人自身点云
 
+    horizon: 10.0
+
 cloud_tf_publisher:
   ros__parameters:
     # --- 里程计输入 ---

@@ -1,0 +1,50 @@
+{
+  "source_step": "/home/rainple/maps/stp/RMUC2026_V2.0.0.stp",
+  "source_step_sha256": "8dfe9ebd761e44d91361b3e593bc05416329112217b58cb35800b3cde2ffae33",
+  "source_unit": "millimetre",
+  "output_unit": "metre",
+  "scale_applied": 0.001,
+  "origin_mode": "center-ground",
+  "origin_shift_m_in_source_coordinates": [
+    7.070549999710352e-06,
+    1.6243436765,
+    -1.8
+  ],
+  "source_brep_bounds_mm": [
+    -14882.594154617296,
+    -6383.819001907299,
+    -1947.9458250892974,
+    14882.608295717297,
+    9632.506354907297,
+    1866.8856624248972
+  ],
+  "step_roots": 1,
+  "transferred_roots": 1,
+  "faces_without_triangulation": 32,
+  "linear_deflection_mm": 20.0,
+  "angular_deflection_deg": 15.0,
+  "mesh_vertices": 1357845,
+  "mesh_triangles": 2694291,
+  "slope_candidate_triangles": 413316,
+  "slope_candidate_max_slope_deg": 35.0,
+  "raw_visual_surface_sample_pcd": "jie_nav/rmuc2026_field_raw_visual_surface_sample.pcd",
+  "raw_surface_sample_points": 303166,
+  "bounds_m_after_shift": {
+    "min": [
+      -14.87600411839,
+      -8.00156557163,
+      -0.14134871831200013
+    ],
+    "max": [
+      14.87600411839,
+      8.00156557163,
+      3.6599684306151996
+    ],
+    "size": [
+      29.75200823678,
+      16.00313114326,
+      3.8013171489271995
+    ]
+  },
+  "warning": "The *_slope_candidates.ply file is diagnostic and cannot represent tunnels. Run build_multilevel_nav_mesh.py on the high-detail *_visual.stl before installing the canonical navigation PLY. The random *_raw_visual_surface_sample.pcd is also diagnostic: after collision post-processing, run build_jie_surface_pcd.py on *_collision.stl to create the canonical JIE PCD."
+}
