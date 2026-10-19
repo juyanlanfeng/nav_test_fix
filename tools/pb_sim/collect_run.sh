@@ -38,7 +38,7 @@ CONTACT_DIAGNOSTICS="False"
 POST_GOAL_SECONDS="5"
 DRIVE_MODEL="legacy"
 HEIGHT_DIFF_THRESHOLD="0.2"
-MAP_CACHE="$ROOT/meshnav_demo_ws/rmuc2026_pb_navigation.h5"
+MAP_CACHE="$ROOT/meshnav_demo_ws/rmuc2027_pb_navigation.h5"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -163,7 +163,7 @@ python3 "$ROOT/tools/pb_sim/session.py" env "$SESSION" > "$REPORT_DIR/environmen
   echo "assets_taken_wall=$(wall_time)"
   sha256sum "$ROOT/meshnav_demo_ws/src/pb_vehicle_adapter/models/pb_navigation_robot.sdf" \
             "$ROOT/meshnav_demo_ws/src/pb_vehicle_adapter/urdf/pb_navigation_robot.urdf" \
-            "$ROOT/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2026_field.ply" 2>/dev/null
+            "$ROOT/meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2027_field.ply" 2>/dev/null
   ls -l --time-style=full-iso "$MAP_CACHE" 2>/dev/null
   sha256sum "$MAP_CACHE" 2>/dev/null
   find "$ROOT/third_party" -name 'libMecanumDrive2*' -exec sha256sum {} \; 2>/dev/null
@@ -174,7 +174,7 @@ git status --short >> "$REPORT_DIR/git_head.txt" 2>&1
 
 # ---- simulation ----------------------------------------------------------
 ros2 launch pb_vehicle_adapter pb_vehicle_sim.launch.py \
-  world_name:=rmuc2026_field control_source:=$FRAMEWORK \
+  world_name:=rmuc2027_field control_source:=$FRAMEWORK \
   start_gazebo_gui:=False start_rviz:=False spawn_rendering_sensors:=False \
   contact_diagnostics:="$CONTACT_DIAGNOSTICS" \
   drive_model:="$DRIVE_MODEL" \
@@ -262,7 +262,7 @@ fi
 echo "recorder ready (subscriptions and live data confirmed)"
 
 # ---- goal, cancelled through R2 with the same UUID -----------------------
-timeout -s INT "$COLLECT_SECONDS" ign topic -e -t /world/rmuc2026_field/dynamic_pose/info \
+timeout -s INT "$COLLECT_SECONDS" ign topic -e -t /world/rmuc2027_field/dynamic_pose/info \
   > "$REPORT_DIR/gz_dynamic_pose.txt" 2>&1 &
 GZ_PIDS+=("$!")
 timeout -s INT "$COLLECT_SECONDS" ign topic -e -t /robot/cmd_vel \
@@ -270,7 +270,7 @@ timeout -s INT "$COLLECT_SECONDS" ign topic -e -t /robot/cmd_vel \
 GZ_PIDS+=("$!")
 # The stats stream is what carries the real-time factor; without it the analysis
 # has no RTF evidence and reports the capture as missing.
-timeout -s INT "$COLLECT_SECONDS" ign topic -e -t /world/rmuc2026_field/stats \
+timeout -s INT "$COLLECT_SECONDS" ign topic -e -t /world/rmuc2027_field/stats \
   > "$REPORT_DIR/gz_stats.txt" 2>&1 &
 GZ_PIDS+=("$!")
 # Read-only contact/actuator diagnostics (P1).  These topics exist only when the

@@ -82,7 +82,7 @@ def test_smoke_bundle_has_all_frameworks():
 
 def _dddmr_config():
     path = os.path.join(
-        get_package_share_directory("pb_vehicle_adapter"), "config", "dddmr_rmuc2026.yaml"
+        get_package_share_directory("pb_vehicle_adapter"), "config", "dddmr_rmuc2027.yaml"
     )
     with open(path, encoding="utf-8") as stream:
         return yaml.safe_load(stream)

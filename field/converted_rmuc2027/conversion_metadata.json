@@ -1,0 +1,83 @@
+{
+  "source_step": "/home/rainple/maps/stp/RMUC2027_V1.0.0.stp",
+  "source_step_sha256": "a5ad3ede3b7674fc98f2e73b71717216383cb2b4b5dcdbe900c2038918bea8e0",
+  "source_unit": "millimetre",
+  "output_unit": "metre",
+  "scale_applied": 0.001,
+  "origin_mode": "center-ground",
+  "origin_shift_m_in_source_coordinates": [
+    7.206225248523879e-06,
+    1.6243436765,
+    -1.74
+  ],
+  "source_brep_bounds_mm": [
+    -14000.00746604507,
+    -6377.240365462499,
+    -1941.3621468274982,
+    14000.021879255071,
+    9625.9277184625,
+    1857.4276710351983
+  ],
+  "step_roots": 1,
+  "transferred_roots": 1,
+  "faces_without_triangulation": 47,
+  "linear_deflection_mm": 50.0,
+  "angular_deflection_deg": 20.0,
+  "mesh_vertices": 897619,
+  "mesh_triangles": 1798709,
+  "slope_candidate_triangles": 253301,
+  "slope_candidate_max_slope_deg": 35.0,
+  "raw_visual_surface_sample_pcd": "point_clouds/rmuc2027_field_raw_visual_surface_sample.pcd",
+  "raw_surface_sample_points": 271577,
+  "bounds_m_after_shift": {
+    "min": [
+      -13.999995746218474,
+      -8.00156557163,
+      -0.20134367649500007
+    ],
+    "max": [
+      13.999995746218474,
+      8.00156557163,
+      3.5970890756703
+    ],
+    "size": [
+      27.999991492436948,
+      16.00313114326,
+      3.7984327521653
+    ]
+  },
+  "warning": "The *_slope_candidates.ply file is diagnostic and cannot represent tunnels. Run build_multilevel_nav_mesh.py on the high-detail *_visual.stl before installing the canonical navigation PLY. The random *_raw_visual_surface_sample.pcd is also diagnostic; validate its alignment and surface coverage before using it as an obstacle-subtraction background.",
+  "mesh_planner_multilevel": {
+    "source_mesh": "gazebo/models/rmuc2027_field/meshes/rmuc2027_field_visual.stl",
+    "canonical_file": "mesh_planner/rmuc2027_field.ply",
+    "sha256": "512daa0b72b706d874f19ca937bc67987fd7297eb045beccda0d5b77bb13e090",
+    "grid_resolution_m": 0.05,
+    "max_slope_deg": 35.0,
+    "robot_height_m": 0.05,
+    "hit_merge_m": 0.012,
+    "allow_reversed_regions": [],
+    "surface_orientation_policy": "signed_upward_plus_audited_bidirectional_regions",
+    "headroom_blocker_policy": "next_slope_like_surface_ignore_vertical_seams",
+    "layer_matching_policy": "reciprocal_nearest_height",
+    "vertices": 229296,
+    "triangles": 447122,
+    "edge_connected_components": 12,
+    "bounds_m": [
+      [
+        -13.95,
+        -8.0,
+        -0.11083103976042974
+      ],
+      [
+        13.950000000000397,
+        8.000000000000227,
+        0.807279829414302
+      ]
+    ],
+    "boundary_edges": 11576,
+    "nonmanifold_edges": 0,
+    "xy_locations_with_multiple_layers": 53473,
+    "maximum_face_slope_deg": 34.85615780264331,
+    "low_corridor_checks": []
+  }
+}

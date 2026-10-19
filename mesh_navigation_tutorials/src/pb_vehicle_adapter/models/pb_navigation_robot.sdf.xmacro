@@ -290,7 +290,7 @@
             name="pb_gazebo_sim_support::ChassisTruth">
       <link_name>chassis</link_name>
       <topic>/pb_sim/chassis_truth</topic>
-      <world_frame>rmuc2026_field</world_frame>
+      <world_frame>rmuc2027_field</world_frame>
       <child_frame>chassis</child_frame>
       <publish_period_s>0.01</publish_period_s>
     </plugin>

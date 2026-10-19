@@ -23,7 +23,7 @@ URDF_PATH = os.path.join(SHARE, "urdf", "pb_navigation_robot.urdf")
 PROFILE_PATH = os.path.join(SHARE, "config", "pb_vehicle_profile.yaml")
 MESH_SHARE = get_package_share_directory("mesh_navigation_tutorials")
 NAV_CONFIG_PATH = os.path.join(MESH_SHARE, "config", "mbf_mesh_nav.yaml")
-DDDMR_CONFIG_PATH = os.path.join(SHARE, "config", "dddmr_rmuc2026.yaml")
+DDDMR_CONFIG_PATH = os.path.join(SHARE, "config", "dddmr_rmuc2027.yaml")
 
 REMOVED_STRUCTURE = ("gimbal", "armor", "projectile", "light", "speed_monitor", "barrel")
 WHEELS = ("front_left_wheel", "front_right_wheel", "rear_left_wheel", "rear_right_wheel")

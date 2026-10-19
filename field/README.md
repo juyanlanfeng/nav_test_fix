@@ -1,11 +1,11 @@
 # field — RMUC 2026 场地资源转换工作区
 
-本目录存放场地 CAD 模型或三维点云到各类导航地图
-(mesh / OctoMap / 点云)的**转换脚本与说明文档**。支持两条独立输入流程：
+本目录存放场地 CAD 模型或三维点云到 Gazebo 场地模型、MeshNav 导航面和诊断点云的
+**转换脚本与说明文档**。支持两条独立输入流程：
 `STP → mesh` 和 `PCD → mesh`。原始模型与转换产物**不纳入
 git**,详见下文[资源文件说明](#资源文件说明)。
 
-本文的 MeshNav 启动步骤使用 `/home/rainple/nav_test/mesh_navigation_tutorials`
+本文的 MeshNav 启动步骤使用 `/home/rainple/nav_test_fix/mesh_navigation_tutorials`
 这个 ROS 2 工作空间：源码在其 `src/` 下，地图预览入口在工作空间的 `launch/` 下，
 构建与环境加载都从该工作空间执行。
 
@@ -16,20 +16,18 @@ git**,详见下文[资源文件说明](#资源文件说明)。
 | `step_to_nav_maps.py` | STP → mesh 导航地图(主转换流程) |
 | `pcd_to_nav_mesh.py` | PCD → 分层可行驶面候选 PLY；隧道/上下层需逐段验证 |
 | `build_multilevel_nav_mesh.py` | 构建多层导航 mesh(含斜坡/隧道) |
-| `build_jie_surface_pcd.py` | 生成 jie_path 使用的表面点云 PCD |
 | `build_component_collision_mesh.py` | 生成部件碰撞网格 |
 | `postprocess_nav_maps.py` | 导航地图后处理 |
 | `conversion_metadata.py` | 安全合并可重复生成字段与人工/运行验证 provenance |
 | `verify_rmuc_project.py` | 校验转换项目完整性 |
-| `verify_jie_tunnel_pcd.py` | 校验隧道 PCD |
-| `test_build_jie_surface_pcd.py` | 测试:jie 表面点云 |
+| `test_step_to_nav_maps.py` | 测试:STP 实际转换、通用点云输出与导航元数据保留 |
+| `test_compare_step_pcd_coverage.py` | 测试:通用 PCD 读取与体素覆盖比较 |
 | `test_build_multilevel_nav_mesh.py` | 测试:多层导航 mesh |
 | `test_pcd_to_nav_mesh.py` | 测试:PCD 解析、降采样与分层 mesh |
 | `test_conversion_metadata.py` | 测试:干净重建后的 metadata 闭环与兼容性 |
 | `test_verify_rmuc_project.py` | 测试:H5 与几何/参数输入的新鲜度判定 |
 | `../mesh_navigation_tutorials/launch/meshnav_map_test.launch.py` | 无仿真的 MeshNav 地图预览入口 |
 | `../mesh_navigation_tutorials/src/mesh_navigation_tutorials/scripts/` | 原始 PCD 显示与仅规划工具 |
-| [`../doc/CONVERSION_AND_USAGE.md`](../doc/CONVERSION_AND_USAGE.md) | 转换流程与使用说明(详细文档) |
 | `requirements-conversion.txt` | 转换脚本的 Python 依赖 |
 | `RMUC2026_step_report.json` | STP 转换报告(元数据) |
 
@@ -41,8 +39,8 @@ git**,详见下文[资源文件说明](#资源文件说明)。
 | 被排除路径 | 内容 | 大小 | 重建方式 |
 |---|---|---|---|
 | `RMUC2026_V2.0.0.stp` | RMUC 2026 场地原始 CAD | ~1.2 GB | 上游 CAD 来源,需人工获取 |
-| `converted_rmuc2026/` | STP 转换产物:gazebo 模型(含 `rmuc2026_field_visual.stl`)、jie_nav PCD、mesh_planner mesh、缓存 | ~300 MB | 运行 `step_to_nav_maps.py` / `build_jie_surface_pcd.py` 等脚本重新生成 |
-| `.step_convert_venv/` | 转换用 Python 虚拟环境 | ~160 MB | `requirements-conversion.txt` + `python -m venv` 重建 |
+| `converted_rmuc2026/` | STP 转换产物:Gazebo 模型(含 `rmuc2026_field_visual.stl`)、`point_clouds/` 诊断采样、`mesh_planner/` 导航面和缓存 | ~300 MB | 运行 `step_to_nav_maps.py` / `build_multilevel_nav_mesh.py` 等脚本重新生成 |
+| `.step_convert_venv/` | 转换用 Python 虚拟环境 | ~160 MB | 使用 `uv venv` 和 `requirements-conversion.txt` 重建 |
 
 > 注意:`converted_rmuc2026/gazebo/models/.../rmuc2026_field_visual.stl`(107 MB)
 > 是 Gazebo 仿真的视觉网格,超过 GitHub 单文件限制,故同样不纳入仓库。
@@ -51,22 +49,23 @@ git**,详见下文[资源文件说明](#资源文件说明)。
 
 ```bash
 # 从项目根目录执行，确保下面的相对路径一致
-cd /home/rainple/nav_test
+cd /home/rainple/nav_test_fix
 
 # 1. 建立虚拟环境并安装依赖
-python3 -m venv field/.step_convert_venv
-field/.step_convert_venv/bin/pip install -r field/requirements-conversion.txt
+uv venv --python /usr/bin/python3 field/.step_convert_venv
+uv pip install --python field/.step_convert_venv/bin/python \
+  -r field/requirements-conversion.txt
 
 # 2. 放置 RMUC2026_V2.0.0.stp 于 field/，先检查 STEP 单位和边界
 field/.step_convert_venv/bin/python field/step_to_nav_maps.py inspect \
-  field/RMUC2026_V2.0.0.stp \
-  --report field/RMUC2026_step_report.json
+  /home/rainple/maps/stp/RMUC2027_V1.0.0.stp \
+  --report field/RMUC2027_step_report.json
 
-# 3. 三角化 STEP 并生成基础/诊断资源；canonical PLY/PCD 还需继续执行详细文档第 7 节
+# 3. 三角化 STEP 并生成基础/诊断资源；正式导航面还需执行多层网格构建
 field/.step_convert_venv/bin/python field/step_to_nav_maps.py convert \
-  field/RMUC2026_V2.0.0.stp \
-  --output field/converted_rmuc2026 \
-  --model-name rmuc2026_field \
+  /home/rainple/maps/stp/RMUC2027_V1.0.0.stp \
+  --output field/converted_rmuc2027 \
+  --model-name rmuc2027_field \
   --linear-deflection-mm 50 \
   --angular-deflection-deg 20 \
   --max-slope-deg 35 \
@@ -77,8 +76,69 @@ field/.step_convert_venv/bin/python field/step_to_nav_maps.py convert \
   --origin center-ground
 ```
 
-完整的碰撞网格、JIE PCD、多层 MeshNav PLY 构建与验收步骤见
-[`doc/CONVERSION_AND_USAGE.md`](../doc/CONVERSION_AND_USAGE.md)。
+转换输出的 `point_clouds/` 是从网格表面采样的诊断点云，不是完整占据地图，
+不能直接视为实测背景 PCD 或已验收的导航地图。
+
+继续从完整视觉 STL 提取多层可行驶面：
+
+```bash
+field/.step_convert_venv/bin/python field/build_multilevel_nav_mesh.py \
+  field/converted_rmuc2027/gazebo/models/rmuc2027_field/meshes/rmuc2027_field_visual.stl \
+  field/converted_rmuc2027/mesh_planner/rmuc2027_field.ply \
+  --grid-m 0.05 \
+  --max-slope-deg 35 \
+  --robot-height-m 0.05 \
+  --min-component-area-m2 1.0 \
+  --report field/converted_rmuc2026/mesh_planner/rmuc2027_field.multilevel.json
+```
+
+以上参数是示例，坡度、机器人净高和连通面筛选阈值应按车辆及场地设置。
+新场地不要启用 `--rmuc2026-profile`，它包含旧场地的专用区域。
+`*_slope_candidates.ply` 仅供诊断，MeshNav 应使用上面单独构建的 PLY；
+后文的地图预览入口可通过 `mesh_map_path` 加载它。
+
+转换器同时生成 `gazebo/models/rmuc2026_field/` 和
+`gazebo/worlds/rmuc2026_field.sdf`。可先在 Gazebo 中单独检查场地显示和碰撞：
+
+```bash
+cd /home/rainple/nav_test_fix
+IGN_GAZEBO_RESOURCE_PATH="$PWD/field/converted_rmuc2027/gazebo/models${IGN_GAZEBO_RESOURCE_PATH:+:$IGN_GAZEBO_RESOURCE_PATH}" \
+  ign gazebo field/converted_rmuc2027/gazebo/worlds/rmuc2027_field.sdf
+```
+
+该命令只加载场地。接入机器人仿真时，还需把模型和世界放入仿真包资源目录，
+并同步世界名称、机器人出生位姿、导航 PLY 及静态背景 PCD 路径。
+这些资源必须使用同一套米制坐标；`--origin center-ground` 施加的原点平移记录在
+`conversion_metadata.json` 中，独立提供的 PCD 需要施加相同配准。
+
+若完整碰撞网格影响性能，可用 `build_component_collision_mesh.py` 按完整部件筛选，
+先运行 `--help` 查看面数预算和高度阈值。更换碰撞网格后，应逐处验证坡道、隧道和墙体，
+并检查机器人落地及通行行为。
+
+### 离线资源校验
+
+把模型和世界同步到 `mesh_navigation_tutorials/src/mesh_navigation_tutorials_sim/`
+后，可检查生成资源、ROS 副本、导航报告和缓存时间是否一致：
+
+```bash
+cd /home/rainple/nav_test_fix
+field/.step_convert_venv/bin/python field/verify_rmuc_project.py \
+  --base field/converted_rmuc2026 \
+  --workspace mesh_navigation_tutorials \
+  --model-name rmuc2026_field \
+  --ros-map field/converted_rmuc2026/mesh_planner/rmuc2026_field.ply
+```
+
+`--ros-map` 应填写 MBF 实际使用的 PLY；省略时检查导航包 `maps/` 中的同名副本。
+`--h5` 可指定实际缓存路径，默认检查所选运行地图旁的同名 H5；尚未生成缓存时提示首次
+启动重建，已有但为空或早于输入文件的缓存则校验失败。使用 `--check-installed` 可追加
+运行文件存在性检查。该工具仅做离线一致性校验，路线仍需单独通过 GetPath 和仿真验收。
+
+可在转换环境中运行全部单元测试和小型 STEP 转换回归：
+
+```bash
+env -u PYTHONPATH field/.step_convert_venv/bin/python -m unittest discover -s field -p 'test_*.py'
+```
 
 ## PCD → MeshNav 导航地图
 
@@ -120,7 +180,7 @@ PCL 1.12 在少数 `binary_compressed → binary` 转换中会在 `POINTS` 声�
 先检查字段、点数、边界、法向有效数和 SHA256，不生成地图：
 
 ```bash
-cd /home/rainple/nav_test
+cd /home/rainple/nav_test_fix
 field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py inspect \
   /path/to/map.pcd --report field/pcd_inspection.json
 ```
@@ -130,18 +190,18 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py inspect \
 
 ### 2. 生成分层 PLY
 
-本节命令中的 `field/...` 都相对于项目根目录 `/home/rainple/nav_test`。
-如果当前在 `field/pcd`，先执行 `cd /home/rainple/nav_test`；
+本节命令中的 `field/...` 都相对于项目根目录 `/home/rainple/nav_test_fix`。
+如果当前在 `field/pcd`，先执行 `cd /home/rainple/nav_test_fix`；
 否则 Bash 会把 `field/...` 错误地解释成 `field/pcd/field/...`。
 
 下面命令从 `Map_converted.pcd` 生成独立的 `guidong_v3.ply` 候选地图，
 不会覆盖前面的 `site_v2.ply`：
 
 ```bash
-cd /home/rainple/nav_test
+cd /home/rainple/nav_test_fix
 field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
-  field/pcd/Map_converted.pcd \
-  field/converted_pcd/mesh_planner/guidong_v3.ply \
+  /home/rainple/maps/pcd/map_with_ground_processed.pcd \
+  field/converted_pcd/mesh_planner/map_with_ground.ply \
   --voxel-m 0.01 \
   --normal-k 24 \
   --grid-m 0.10 \
@@ -150,7 +210,7 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
   --robot-height-m 0.05 \
   --min-points-per-cell 3 \
   --min-component-area-m2 1.0 \
-  --report field/converted_pcd/mesh_planner/guidong_v3.pcd_to_mesh.json
+  --report field/converted_pcd/mesh_planner/map_with_ground.pcd_to_mesh.json
 ```
 
 对这份点云实测：302071 个有效点，最近邻间距中位数约 0.023 m。
@@ -197,7 +257,7 @@ field/.step_convert_venv/bin/python field/pcd_to_nav_mesh.py convert \
 `site_v2.ply`：
 
 ```bash
-cd /home/rainple/nav_test
+cd /home/rainple/nav_test_fix
 field/.step_convert_venv/bin/python field/check_nav_mesh_route.py \
   field/converted_pcd/mesh_planner/site_v2.ply \
   --start 4.5 -1.2 -0.48 --goal 5.2 -0.7 -0.48 \
@@ -227,7 +287,7 @@ field/.step_convert_venv/bin/python field/check_nav_mesh_route.py \
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /home/rainple/nav_test/mesh_navigation_tutorials
+cd /home/rainple/nav_test_fix/mesh_navigation_tutorials
 colcon build --symlink-install --cmake-clean-cache --packages-up-to mesh_navigation_tutorials
 source install/setup.bash
 ```
@@ -236,11 +296,11 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
+source /home/rainple/nav_test_fix/mesh_navigation_tutorials/install/setup.bash
 ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
-  mesh_map_path:=/home/rainple/nav_test/field/converted_pcd/mesh_planner/guidong_v3.ply \
-  mesh_map_working_path:=/home/rainple/nav_test/mesh_navigation_tutorials/site_v2_navigation.h5 \
-  source_pcd_path:=/home/rainple/nav_test/field/pcd/Map_converted.pcd \
+  mesh_map_path:=/home/rainple/nav_test_fix/field/converted_pcd/mesh_planner/guidong_v3.ply \
+  mesh_map_working_path:=/home/rainple/nav_test_fix/mesh_navigation_tutorials/site_v2_navigation.h5 \
+  source_pcd_path:=/home/rainple/nav_test_fix/field/pcd/Map_converted.pcd \
   publish_source_cloud:=true \
   static_inscribed_radius:=0.15 \
   static_inflation_radius:=0.10 \
@@ -259,7 +319,7 @@ RViz 的 `Source PCD (scene only)` 应显示墙、柱、顶面，`MeshNav surfac
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
+source /home/rainple/nav_test_fix/mesh_navigation_tutorials/install/setup.bash
 ros2 run mesh_navigation_tutorials meshnav_plan_only \
   --start 4.5 -1.2 -0.48 \
   --goal   5.2 -0.7 -0.48
@@ -275,11 +335,11 @@ ros2 run mesh_navigation_tutorials meshnav_plan_only \
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
+source /home/rainple/nav_test_fix/mesh_navigation_tutorials/install/setup.bash
 ros2 launch mesh_navigation_tutorials meshnav_map_test.launch.py \
-  mesh_map_path:=/home/rainple/nav_test/field/converted_pcd/mesh_planner/goudongv2.ply \
-  mesh_map_working_path:=/home/rainple/nav_test/mesh_navigation_tutorials/goudongv2_navigation.h5 \
-  source_pcd_path:=/home/rainple/nav_test/field/pcd/Map_converted.pcd \
+  mesh_map_path:=/home/rainple/nav_test_fix/field/converted_pcd/mesh_planner/goudongv2.ply \
+  mesh_map_working_path:=/home/rainple/nav_test_fix/mesh_navigation_tutorials/goudongv2_navigation.h5 \
+  source_pcd_path:=/home/rainple/nav_test_fix/field/pcd/Map_converted.pcd \
   publish_source_cloud:=true \
   static_inscribed_radius:=0.22 \
   static_inflation_radius:=0.70 \
@@ -315,7 +375,7 @@ H5 缓存与 PLY 及导航参数绑定。更换 PLY、坡度/膨胀参数后必�
 先运行脚本测试：
 
 ```bash
-cd /home/rainple/nav_test
+cd /home/rainple/nav_test_fix
 PYTHONPATH=field field/.step_convert_venv/bin/python -m unittest \
   field/test_pcd_to_nav_mesh.py
 ```

@@ -44,7 +44,7 @@
 # 仅供启动文件读取的导航选项；meshnav_launch 不是 ROS 节点。
 meshnav_launch:
   ros__parameters:
-    map_name: 'rmuc2026_field'       # RMCL 地图名；对应 maps/<名称>.ply。
+    map_name: 'rmuc2027_field'       # RMCL 地图名；对应 maps/<名称>.ply。
     localization: 'ground_truth'     # 定位方式：ground_truth 或 rmcl_micpl。
     obstacle_segmentation: 'rmcl_seg'  # 障碍点云来源：none、ground_truth 或 rmcl_seg。
     start_rviz: 'True'               # 是否打开导航 RViz。
@@ -183,7 +183,7 @@ move_base_flex:
     mesh_map:
       # ---- 输入与缓存 -------------------------------------------------------
       # mesh_file: '/home/rainple/nav_test/mesh_navigation_tutorials/src/mesh_navigation_tutorials/maps/rmuc2026_field.ply'
-      mesh_file: '/home/rainple/maps/ply/only_ubuntu.ply'
+      mesh_file: '/home/rainple/nav_test_fix/mesh_navigation_tutorials/src/mesh_navigation_tutorials/maps/rmuc2027_field.ply'
       #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。

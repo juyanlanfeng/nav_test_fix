@@ -126,7 +126,7 @@ def generate_launch_description():
     def spawn_robot(context):
         # The RMUC centre contains geometry; the tested upper-right floor is
         # at z ~= 0.028 m. Other tutorial worlds keep their original origin.
-        defaults = (11.0, 5.0, 0.13, 0.0) if world_name.perform(context) == "rmuc2026_field" \
+        defaults = (11.0, 5.0, 0.13, 0.0) if world_name.perform(context) == "rmuc2027_field" \
             else (0.0, 0.0, 0.1, 0.0)
         requested = [LaunchConfiguration(name).perform(context)
                      for name in ("spawn_x", "spawn_y", "spawn_z", "spawn_yaw")]

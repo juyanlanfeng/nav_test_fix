@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert a millimetre STEP arena into Gazebo, mesh_nav, and JIE map assets.
+"""Convert a millimetre STEP arena into Gazebo and MeshNav assets.
 
 The script deliberately separates inspection from tessellation because large STEP
 assemblies can require many gigabytes of memory.
@@ -363,10 +363,10 @@ def convert(args) -> None:
     output = args.output
     gazebo_mesh_dir = output / "gazebo" / "models" / args.model_name / "meshes"
     mesh_nav_dir = output / "mesh_planner"
-    jie_dir = output / "jie_nav"
+    point_cloud_dir = output / "point_clouds"
     gazebo_mesh_dir.mkdir(parents=True, exist_ok=True)
     mesh_nav_dir.mkdir(parents=True, exist_ok=True)
-    jie_dir.mkdir(parents=True, exist_ok=True)
+    point_cloud_dir.mkdir(parents=True, exist_ok=True)
 
     visual_name = f"{args.model_name}_visual.stl"
     collision_name = f"{args.model_name}_collision.stl"
@@ -407,16 +407,14 @@ def convert(args) -> None:
             f"approximately {requested_points}"
         )
     # A global random sample is useful for visually inspecting STEP scaling,
-    # but it is not a topology-safe occupancy map: small floors/walls may get
-    # no sample at all.  Keep it under an explicitly diagnostic filename so a
-    # full STEP conversion can never overwrite the canonical JIE map.  After
-    # collision post-processing, build_jie_surface_pcd.py deterministically
-    # rasterizes that collision mesh into the canonical *.pcd.
+    # but small floors/walls may get no sample at all. Keep it separate from
+    # navigation geometry and validate coverage before using it as a background
+    # cloud for obstacle subtraction.
     log(f"Sampling {sample_count} points for diagnostic visual-surface PCD")
     points, _ = trimesh.sample.sample_surface(full_mesh, sample_count, seed=42)
-    pcd_path = jie_dir / f"{args.model_name}_raw_visual_surface_sample.pcd"
+    pcd_path = point_cloud_dir / f"{args.model_name}_raw_visual_surface_sample.pcd"
     write_binary_pcd(pcd_path, points)
-    log(f"Wrote diagnostic PCD (not canonical JIE occupancy): {pcd_path}")
+    log(f"Wrote diagnostic visual-surface PCD: {pcd_path}")
 
     metadata = {
         "source_step": str(args.step.resolve()),
@@ -447,11 +445,11 @@ def convert(args) -> None:
             "The *_slope_candidates.ply file is diagnostic and cannot represent tunnels. "
             "Run build_multilevel_nav_mesh.py on the high-detail *_visual.stl before "
             "installing the canonical navigation PLY. The random *_raw_visual_surface_"
-            "sample.pcd is also diagnostic: after collision post-processing, run "
-            "build_jie_surface_pcd.py on *_collision.stl to create the canonical JIE PCD."
+            "sample.pcd is also diagnostic; validate its alignment and surface coverage "
+            "before using it as an obstacle-subtraction background."
         ),
     }
-    # ``convert`` does not replace the canonical PLY/PCD.  Preserve their
+    # ``convert`` does not replace the canonical navigation PLY. Preserve its
     # downstream provenance only when the source STEP bytes are unchanged;
     # otherwise those builders must recreate and revalidate their artifacts.
     metadata = merge_conversion_root(previous_metadata, metadata)

@@ -27,7 +27,6 @@
   "mesh_triangles": 2694291,
   "slope_candidate_triangles": 413316,
   "slope_candidate_max_slope_deg": 35.0,
-  "raw_visual_surface_sample_pcd": "jie_nav/rmuc2026_field_raw_visual_surface_sample.pcd",
   "raw_surface_sample_points": 303166,
   "bounds_m_after_shift": {
     "min": [
@@ -46,5 +45,5 @@
       3.8013171489271995
     ]
   },
-  "warning": "The *_slope_candidates.ply file is diagnostic and cannot represent tunnels. Run build_multilevel_nav_mesh.py on the high-detail *_visual.stl before installing the canonical navigation PLY. The random *_raw_visual_surface_sample.pcd is also diagnostic: after collision post-processing, run build_jie_surface_pcd.py on *_collision.stl to create the canonical JIE PCD."
+  "warning": "The *_slope_candidates.ply file is diagnostic and cannot represent tunnels. Run build_multilevel_nav_mesh.py on the high-detail *_visual.stl before installing the canonical navigation PLY. The random *_raw_visual_surface_sample.pcd is also diagnostic; validate its alignment and surface coverage before using it as an obstacle-subtraction background."
 }

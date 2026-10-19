@@ -26,7 +26,7 @@ from rclpy.node import Node
 import tf2_ros
 
 
-DDDMR_MAP_DIR = Path("/home/rainple/nav_test/field/converted_rmuc2026/dddmr_nav")
+DDDMR_MAP_DIR = Path("/home/rainple/nav_test/field/converted_rmuc2027/dddmr_nav")
 
 FRAMEWORKS = {
     "meshnav": {
@@ -53,8 +53,8 @@ FRAMEWORKS = {
         "control_source": "dddmr",
         "velocity_topic": "/pb/dddmr_cmd_vel_stamped",
         "map_files": [
-            DDDMR_MAP_DIR / "rmuc2026_mapcloud.pcd",
-            DDDMR_MAP_DIR / "rmuc2026_mapground.pcd",
+            DDDMR_MAP_DIR / "rmuc2027_mapcloud.pcd",
+            DDDMR_MAP_DIR / "rmuc2027_mapground.pcd",
             DDDMR_MAP_DIR / "map_manifest.yaml",
         ],
     },

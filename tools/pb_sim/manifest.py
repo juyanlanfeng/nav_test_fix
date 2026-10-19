@@ -128,8 +128,8 @@ def main():
                     "link_target": os.readlink(target) if target.is_symlink() else None,
                 })
         # Deliberately hash the configuration the runs depend on.
-        for name in ("meshnav_demo_ws/rmuc2026_pb_low_navigation.h5",
-                     "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/rmuc2026_field.ply"):
+        for name in ("meshnav_demo_ws/rmuc2027_pb_low_navigation.h5",
+                     "meshnav_demo_ws/src/mesh_navigation_tutorials-v1/mesh_navigation_tutorials/maps/7_field.ply"):
             path = ROOT / name
             if path.is_file():
                 manifest.setdefault("runtime_assets", []).append({

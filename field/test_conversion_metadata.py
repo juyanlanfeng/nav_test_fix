@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """Lightweight regressions for clean-rebuild conversion provenance."""
 
-from argparse import Namespace
 from pathlib import Path
-import tempfile
 import unittest
 
-from build_jie_surface_pcd import update_conversion_metadata
 from conversion_metadata import (
-    load_json_object,
     merge_conversion_root,
     merge_hashed_object,
     merge_hashed_section,
-    write_json_object,
 )
 from postprocess_nav_maps import default_collision_report_path
 
@@ -22,7 +17,7 @@ class ConversionMetadataTest(unittest.TestCase):
         previous = {
             "source_step_sha256": "same-step",
             "linear_deflection_mm": 20,
-            "jie_nav_surface_pcd": {"sha256": "pcd", "manual_check": "pass"},
+            "mesh_planner_multilevel": {"sha256": "ply", "manual_check": "pass"},
         }
         generated = {
             "source_step_sha256": "same-step",
@@ -34,13 +29,13 @@ class ConversionMetadataTest(unittest.TestCase):
 
         self.assertEqual(merged["linear_deflection_mm"], 50)
         self.assertEqual(
-            merged["jie_nav_surface_pcd"]["manual_check"], "pass"
+            merged["mesh_planner_multilevel"]["manual_check"], "pass"
         )
 
     def test_step_root_refresh_drops_downstream_for_changed_source_hash(self):
         previous = {
             "source_step_sha256": "old-step",
-            "jie_nav_surface_pcd": {"sha256": "old-pcd", "manual_check": "pass"},
+            "mesh_planner_multilevel": {"sha256": "old-ply", "manual_check": "pass"},
         }
         generated = {
             "source_step_sha256": "new-step",
@@ -51,7 +46,7 @@ class ConversionMetadataTest(unittest.TestCase):
 
     def test_step_root_refresh_drops_downstream_for_unknown_source_hash(self):
         previous = {
-            "jie_nav_surface_pcd": {"sha256": "old-pcd", "manual_check": "pass"},
+            "mesh_planner_multilevel": {"sha256": "old-ply", "manual_check": "pass"},
         }
         generated = {"source_unit": "millimetre"}
 
@@ -105,46 +100,6 @@ class ConversionMetadataTest(unittest.TestCase):
 
         self.assertNotIn("critical_components_preserved", merged)
         self.assertEqual(merged, generated)
-
-    def test_jie_builder_closes_metadata_and_preserves_same_hash_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory) / "converted"
-            output = base / "jie_nav" / "arena.pcd"
-            source = base / "gazebo" / "arena_collision.stl"
-            report_path = base / "jie_nav" / "arena.surface.json"
-            metadata_path = base / "conversion_metadata.json"
-            write_json_object(
-                metadata_path,
-                {
-                    "source_unit": "millimetre",
-                    "jie_nav_surface_pcd": {
-                        "sha256": "pcd-hash",
-                        "offline_validation": {"tunnel": "pass"},
-                    },
-                },
-            )
-            args = Namespace(source=source, output=output, report=report_path)
-            report = {
-                "output_sha256": "pcd-hash",
-                "output_points": 42,
-                "output_file_size_bytes": 504,
-                "surface_voxel_m": 0.05,
-                "subdivision_edge_factor": 1.1,
-                "maximum_subdivided_edge_m": 0.05 / 1.1,
-                "z_band_m": [-0.08, 0.9],
-                "output_coordinate_policy": (
-                    "(nearest_lattice_key + 0.5) * surface_voxel_m"
-                ),
-            }
-
-            self.assertTrue(update_conversion_metadata(args, report))
-            metadata = load_json_object(metadata_path)
-            jie = metadata["jie_nav_surface_pcd"]
-            self.assertEqual(jie["canonical_file"], "jie_nav/arena.pcd")
-            self.assertEqual(jie["source_mesh"], "gazebo/arena_collision.stl")
-            self.assertEqual(jie["points"], 42)
-            self.assertEqual(jie["offline_validation"], {"tunnel": "pass"})
-            self.assertIn("never the Mesh navigation PLY", jie["occupancy_semantics"])
 
     def test_default_collision_report_matches_verifier_path(self):
         base = Path("converted")

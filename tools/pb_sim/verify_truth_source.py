@@ -276,7 +276,7 @@ def main():
     parser.add_argument("--pause-test", action="store_true",
                         help="T0: pause/resume the world and check the source cannot forge "
                              "fresh output while paused")
-    parser.add_argument("--world", default="rmuc2026_field")
+    parser.add_argument("--world", default="rmuc2027_field")
     arguments = parser.parse_args()
 
     rclpy.init()

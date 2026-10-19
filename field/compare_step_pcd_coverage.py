@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check occupied-cell coverage at independently computed exact STEP hits."""
+"""Check point-cloud voxel coverage at independently computed exact STEP hits."""
 import argparse
 import json
 from pathlib import Path
@@ -7,11 +7,11 @@ from pathlib import Path
 import numpy as np
 
 from conversion_metadata import sha256_file, write_json_object
-from verify_jie_tunnel_pcd import read_binary_xyz_pcd
+from pcd_to_nav_mesh import read_pcd
 
 
 def coverage(pcd, pitch, xyz):
-    points = read_binary_xyz_pcd(pcd).astype(np.float64)
+    points, _, _ = read_pcd(pcd)
     keys = {tuple(k) for k in np.floor(points / pitch).astype(np.int32)}
     covered = np.array([tuple(k) in keys for k in np.floor(xyz / pitch).astype(np.int32)])
     return {

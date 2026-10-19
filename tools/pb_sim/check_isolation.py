@@ -135,7 +135,7 @@ def query_gazebo_topics():
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--world", default="rmuc2026_field")
+    parser.add_argument("--world", default="rmuc2027_field")
     parser.add_argument("--mode", choices=["free", "running"], default="running",
                         help="free: nothing may own the domain yet; "
                              "running: this run must own each required topic")

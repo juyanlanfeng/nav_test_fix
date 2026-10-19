@@ -81,7 +81,7 @@ def _endpoints(clock=(1, ["pb_ros_gz_bridge"]), odom=(1, ["pb_ground_truth_adapt
             "/pb/cmd_vel_safe": entry(cmd), "/tf": entry(tf)}
 
 
-GZ = {"/robot/cmd_vel", "/world/rmuc2026_field/dynamic_pose/info", "/pb_sim/chassis_truth"}
+GZ = {"/robot/cmd_vel", "/world/rmuc2027_field/dynamic_pose/info", "/pb_sim/chassis_truth"}
 
 
 def _verdict(checks):
@@ -89,44 +89,44 @@ def _verdict(checks):
 
 
 def test_isolation_accepts_a_single_owner_for_every_required_topic():
-    verdict = _verdict(check_isolation.evaluate(_endpoints(), GZ, "rmuc2026_field"))
+    verdict = _verdict(check_isolation.evaluate(_endpoints(), GZ, "rmuc2027_field"))
     assert all(verdict.values()), verdict
 
 
 def test_isolation_rejects_a_second_session_sharing_the_domain():
     endpoints = _endpoints(clock=(2, ["pb_ros_gz_bridge"]),
                            odom=(2, ["pb_ground_truth_adapter"]))
-    verdict = _verdict(check_isolation.evaluate(endpoints, GZ, "rmuc2026_field"))
+    verdict = _verdict(check_isolation.evaluate(endpoints, GZ, "rmuc2027_field"))
     assert verdict["single owner for /clock"] is False
     assert verdict["single owner for /odom"] is False
 
 
 def test_isolation_rejects_an_unexpected_command_owner():
     endpoints = _endpoints(cmd=(1, ["someone_else"]))
-    verdict = _verdict(check_isolation.evaluate(endpoints, GZ, "rmuc2026_field"))
+    verdict = _verdict(check_isolation.evaluate(endpoints, GZ, "rmuc2027_field"))
     assert verdict["single owner for /pb/cmd_vel_safe"] is False
 
 
 def test_isolation_requires_the_tf_chain_owners():
     endpoints = _endpoints(tf=(1, ["pb_ground_truth_adapter"]))
-    verdict = _verdict(check_isolation.evaluate(endpoints, GZ, "rmuc2026_field"))
+    verdict = _verdict(check_isolation.evaluate(endpoints, GZ, "rmuc2027_field"))
     assert verdict["tf chain owners present"] is False
 
 
 def test_isolation_treats_a_failed_query_as_a_failure():
-    verdict = _verdict(check_isolation.evaluate(_endpoints(), GZ, "rmuc2026_field",
+    verdict = _verdict(check_isolation.evaluate(_endpoints(), GZ, "rmuc2027_field",
                                                 query_failed={"/odom"}))
     assert verdict["query /odom"] is False
 
 
 def test_isolation_requires_the_gazebo_partition_topics():
     verdict = _verdict(check_isolation.evaluate(_endpoints(), {"/robot/cmd_vel"},
-                                                "rmuc2026_field"))
-    assert verdict["gazebo partition exposes /world/rmuc2026_field/dynamic_pose/info"] is False
+                                                "rmuc2027_field"))
+    assert verdict["gazebo partition exposes /world/rmuc2027_field/dynamic_pose/info"] is False
 
 
 def test_isolation_result_is_json_serialisable():
-    checks = check_isolation.evaluate(_endpoints(), GZ, "rmuc2026_field")
+    checks = check_isolation.evaluate(_endpoints(), GZ, "rmuc2027_field")
     assert json.loads(json.dumps(checks)) == checks
     assert Path("/nonexistent").is_absolute()
 
@@ -304,13 +304,13 @@ def _free_endpoints():
 
 
 def test_free_mode_passes_when_nothing_owns_the_domain():
-    verdict = _verdict(check_isolation.evaluate(_free_endpoints(), set(), "rmuc2026_field",
+    verdict = _verdict(check_isolation.evaluate(_free_endpoints(), set(), "rmuc2027_field",
                                                 (), "free"))
     assert all(verdict.values()), verdict
 
 
 def test_free_mode_passes_when_no_gazebo_server_answers():
-    verdict = _verdict(check_isolation.evaluate(_free_endpoints(), None, "rmuc2026_field",
+    verdict = _verdict(check_isolation.evaluate(_free_endpoints(), None, "rmuc2027_field",
                                                 (), "free"))
     assert all(verdict.values()), verdict
 
@@ -318,20 +318,20 @@ def test_free_mode_passes_when_no_gazebo_server_answers():
 def test_free_mode_fails_on_a_leftover_session():
     endpoints = _free_endpoints()
     endpoints["/clock"] = {"publishers": 1, "nodes": ["pb_ros_gz_bridge"]}
-    verdict = _verdict(check_isolation.evaluate(endpoints, set(), "rmuc2026_field",
+    verdict = _verdict(check_isolation.evaluate(endpoints, set(), "rmuc2027_field",
                                                 (), "free"))
     assert verdict["/clock is free"] is False
 
 
 def test_free_mode_fails_when_the_domain_cannot_be_proven_free():
-    verdict = _verdict(check_isolation.evaluate(_free_endpoints(), set(), "rmuc2026_field",
+    verdict = _verdict(check_isolation.evaluate(_free_endpoints(), set(), "rmuc2027_field",
                                                 {"/odom"}, "free"))
     assert verdict["query /odom"] is False
 
 
 def test_free_mode_fails_when_a_gazebo_server_is_in_the_partition():
     verdict = _verdict(check_isolation.evaluate(_free_endpoints(), {"/robot/cmd_vel"},
-                                                "rmuc2026_field", (), "free"))
+                                                "rmuc2027_field", (), "free"))
     assert verdict["gazebo partition is free"] is False
 
 

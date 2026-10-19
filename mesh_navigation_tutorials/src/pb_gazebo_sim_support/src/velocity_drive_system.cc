@@ -112,7 +112,7 @@ public:
     if (!p || !v || !w) return;
     ignition::msgs::Odometry msg;
     *msg.mutable_header()->mutable_stamp() = ignition::gazebo::convert<ignition::msgs::Time>(info.simTime);
-    auto f = msg.mutable_header()->add_data(); f->set_key("frame_id"); f->add_value("rmuc2026_field");
+    auto f = msg.mutable_header()->add_data(); f->set_key("frame_id"); f->add_value("rmuc2027_field");
     auto c = msg.mutable_header()->add_data(); c->set_key("child_frame_id"); c->add_value("chassis");
     ignition::msgs::Set(msg.mutable_pose(), *p);
     ignition::msgs::Set(msg.mutable_twist()->mutable_linear(), p->Rot().RotateVectorReverse(*v));

@@ -39,7 +39,7 @@ def _odometry(sec, nanosec=0, position=(0.0, 0.0, 0.0), orientation=(0.0, 0.0, 0
               linear=(0.0, 0.0, 0.0), angular=(0.0, 0.0, 0.0)):
     message = Odometry()
     message.header.stamp = TimeMsg(sec=sec, nanosec=nanosec)
-    message.header.frame_id = "rmuc2026_field"
+    message.header.frame_id = "7_field"
     message.child_frame_id = "chassis"
     message.pose = PoseWithCovariance(pose=Pose())
     message.pose.pose.position.x, message.pose.pose.position.y, message.pose.pose.position.z = position
