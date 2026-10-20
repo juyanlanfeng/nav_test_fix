@@ -1,0 +1,292 @@
+# =============================================================================
+# MeshNav 地图与规划参数（mesh_navigation_tutorials 树）
+# =============================================================================
+#
+# 【先分清两类参数——这是最容易踩错的地方】
+#
+#   A. 运行时参数（本文件）：决定"在一张已有的可通行曲面上，哪里贵、哪里致命"。
+#      改完必须让 .h5 缓存失效重算，见下面《缓存失效规则》。
+#
+#   B. 建图参数（不在本文件里）：决定"哪些面算可通行"——最大坡面角度、净空高度、
+#      网格分辨率。这些在生成 PLY 时就已经烧进几何里了，运行时**无法**调整，
+#      只能重建 PLY：
+#          field/build_multilevel_nav_mesh.py
+#              --grid-m 0.05            # 网格分辨率
+#              --max-slope-deg 55.0     # ← 可通行坡面角度
+#              --robot-height-m 0.225   # ← 净空
+#              --hit-merge-m 0.012
+#      已烧进当前地图的值记录在：
+#          field/converted_rmuc2026/mesh_planner/rmuc2026_field.multilevel.json
+#          (max_slope_deg=55.0, robot_height_m=0.225, nonmanifold_edges=0)
+#      ⚠ 55° 是刻意选的：RMUC 两道坡各有 52.5° 的过渡带，把上限收到 50° 或 35°
+#        会把这条过渡带整段抹掉，坡就断了。**不要为了"更保守"而下调它。**
+#
+# 【缓存失效规则】以下任一变化后，旧的 <map>.h5 必须删除并重算，否则你会拿到
+# 一张与新参数不匹配的层缓存，表现为"改了参数但行为没变"：
+#       - PLY 的顶点 / 三角形 / 坐标变化
+#       - 静态 MeshLayer 参数变化（动态 obstacle 历史不读写 HDF5，仅需重启）
+#       - MeshMap / HDF5 格式实现变化
+#    操作：备份或删除 mesh_map.mesh_working_file 指向的 HDF5 文件，然后重启导航；
+#    首次启动会从 mesh_map.mesh_file 指向的 PLY 重算。
+#       ros2 launch pb_vehicle_adapter meshnav_pb_sim.launch.py
+#       ros2 service call /move_base_flex/save_map std_srvs/srv/Trigger "{}"
+#
+# 【footprint 只通过膨胀层进入规划】MeshNav 没有"车体"这个概念，它把车近似成一个
+#   **无方向的圆盘**：
+#       inscribed_radius = 圆盘半径（贴到致命顶点就判死）
+#   内切半径只保护车体中部，不能保证转弯时车角无碰撞。静态窄通道需结合朝向评估。
+#   动态障碍层使用外接半径加余量，避免 MPPI 的点机器人模型擦到障碍。车体参考值
+#   （本车 0.5656 × 0.4332 m）：
+#       inscribed_radius = 0.216608   # 内切 = 半宽
+#       外接半径为 0.356223，动态障碍内圈取 0.40 m。
+# =============================================================================
+
+# 仅供启动文件读取的导航选项；meshnav_launch 不是 ROS 节点。
+meshnav_launch:
+  ros__parameters:
+    map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
+    map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
+    start_rviz: 'True'               # 是否打开导航 RViz。
+    meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
+
+# PB 目标协调节点：周期检查剩余路线，只有旧路不可通行时才重规划。
+meshnav_navigator:
+  ros__parameters:
+    goal_topic: '/rviz/goal_pose'       # RViz Mesh Goal 发布的目标位姿。
+    get_path_action: '/move_base_flex/get_path'  # 全局规划 action。
+    exe_path_action: '/move_base_flex/exe_path'  # 路径执行 action。
+    check_path_service: "/move_base_flex/check_path_cost"  # 使用实时 final 代价检查旧路。
+    pose_timeout: 2.0                # 控制器位姿反馈最长允许间隔，秒（墙钟）；过期停车。
+    path_progress_window: 2.0        # 每次从上次进度向前搜索的路径长度，米；防止交叉处跳段。
+    action_timeout: 15.0              # 路线检查、规划或目标接收超时，秒（墙钟）；超时终止导航。
+    replan_patience: 15.0            # 旧路受阻后先停车；短暂无路时等待重试的总时限，秒（墙钟）。
+    replan_retry_period: 0.5         # 停车重规划的请求间隔，秒（墙钟）；不沿已知受阻旧路继续行驶。
+
+move_base_flex:
+  ros__parameters:
+    # ---- 坐标系与里程计 -----------------------------------------------------
+    global_frame: 'map'          # 全局坐标系。RViz 点的目标坐标就在这个系里；
+                                 # 换掉它，所有目标坐标的含义都会跟着变。
+    robot_frame: 'base_footprint'  # 车体坐标系（贴地投影）。规划器用它查询机器人位姿。
+    # 来自TfTransformer，后面需要单独启动
+    odom_topic: '/Odometry'           # 里程计话题；MBF 由它拿机器人速度（速度长期为 0 会
+                                 # 触发下面的 cmd_vel_ignored_tolerance）。
+
+    # ---- 时间与到达前后行为 -------------------------------------------------
+    use_sim_time: true           # 仿真：时间来自 /clock。真机必须为 false。
+    force_stop_at_goal: true     # 到达后由 MBF 发零速度。注意：**零速度不等于有制动力**，
+                                 # 力控底盘在零指令下仍会滑（本项目实测驻停漂移 1.77 m），
+                                 # 需要独立的保持层来接管。
+    force_stop_on_cancel: true   # 取消时同样发零速度。
+
+    # ---- 全局规划器（在网格上按边权找最小代价曲线）--------------------------
+    planners: ['mesh_planner']
+    mesh_planner:
+      type: 'cvp_mesh_planner/CVPMeshPlanner'
+      # type: 'dijkstra_mesh_planner/DijkstraMeshPlanner'
+      step_width: 0.10          # 沿向量场回溯路径的步长 [m]；默认 0.4 在现场弯道回溯失败。
+                                 # 同一停车位置复测：0.4 失败，0.1 / 0.05 均可生成完整路径。
+      cost_limit: 0.99           # 【关键联动】顶点代价高于此值即被避开。
+                                 # 必须**小于** static_inflation.inscribed_value，
+                                 # 否则膨胀层内圈（已判为靠近障碍）也会被当作可通行，
+                                 # 规划器会贴着障碍甚至穿过去。当前 0.99 < 1.0，安全。
+      publish_vector_field: true # 发布向量场供可视化；MeshController 在每次 setPlan 时读取最新规划向量场。
+
+    planner_patience: 10.0       # 单次全局规划的超时 [s]，超时后按 max_retries 重试。
+    planner_max_retries: 10       # 规划失败重试次数。
+    project_path_onto_mesh: false  # 是否把路径投影回网格。false：直接用规划器输出。
+
+    planner_frequency: 2.0        # PB 检查旧路是否可通行的频率 [Hz]；可通行不换路，0 只规划一次。
+    path_check_step: 0.025        # 路线检查采样间距 [m]，同时检查路径点之间的线段。
+    path_check_max_distance: 0.4  # 检查点到网格表面的最大投影距离 [m]，不是障碍安全间距。
+                                 # 使用首个规划器的 cost_limit；车体余量由膨胀层提供。
+    controller_frequency: 20.0    # 局部控制器计算与发布速度指令的频率 [Hz]。
+
+    # ---- 局部控制器（把"往哪走"变成速度指令）--------------------------------
+    controllers: ['mesh_controller']  # MBF 实例名；重规划节点通过此名称更新执行路径。
+    mesh_controller:
+      type: 'mesh_controller/MeshController'
+      holonomic: true          # 同时输出车体系 vx、vy、wz，允许全向底盘横移。
+      lin_vel_factor: 1.0      # 平移速度倍率；最终受 max_lin_velocity 限制。
+      ang_vel_factor: 7.0      # 转向速度倍率；最终受 max_ang_velocity 限制。
+      max_lin_velocity: 0.8    # 平面合速度上限 sqrt(vx²+vy²)，米/秒。
+      max_ang_velocity: 0.5    # 角速度上限，弧度/秒，沿用 MeshController 默认值。
+      arrival_fading: 0.5      # 距目标小于此距离时逐渐减速，米。
+
+    controller_patience: 2.0     # 单次控制步超时 [s]。
+    controller_max_retries: 4    # 控制失败重试次数。
+    dist_tolerance: 0.2          # 到达判据：与目标的位置误差容差 [m]。
+    angle_tolerance: 6.3         # 到达判据：与目标的航向误差容差 [rad]。
+    cmd_vel_ignored_tolerance: 10.0
+                                 # 机器人连续"忽略速度指令"多久后放弃 [s]。
+                                 # 卡住场景（指令非零但车身不动）就是靠它最终 ABORT，
+                                 # 调小能更快失败退出，但治标不治本。
+
+    mesh_map:
+      # ---- 输入与缓存 -------------------------------------------------------
+      mesh_file: '/home/rm/nav_test_fix/mesh_nav_ws/maps/ply/only_ubuntu.ply'
+      #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
+      mesh_part: '/'
+      #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
+      mesh_working_file: '/home/rm/nav_test_fix/mesh_nav_ws/cache/mesh_nav.h5'
+      #   ↑ 工作缓存：网格 + 各层算出来的逐顶点/逐边代价。通用教程入口可传
+      #     mesh_map_working_path 覆盖。它只是缓存，不是源地图；
+      #     参数或 PLY 一变就必须重算（见文件头《缓存失效规则》）。
+      mesh_working_part: 'mesh'
+      #   ↑ 写入 HDF5 时使用的网格名。
+
+      # ---- 层图：哪些层参与，以及用哪一层做规划 ------------------------------
+      # 处理顺序即下面的列表顺序：前面的层被后面的层当输入。
+      layers:
+        - border              # 网格边界
+        - height_diff         # 相邻高度差（台阶/落差）
+        # - roughness           # 局部粗糙度
+        - static_combination  # 把上面三层线性合成
+        - static_inflation    # 对合成结果做膨胀
+        - obstacle            # 实时障碍点
+        - obstacle_inflation  # 对实时障碍做膨胀
+        - final               # 取 static/obstacle 两者代价的最大值
+
+      default_layer: 'final'
+      #   ↑ 规划与控制实际使用的层。改成 'static_*' 就只用静态地图、忽略实时障碍。
+
+      # ---- 各层的具体参数 ---------------------------------------------------
+      height_diff:
+        type: 'mesh_layers/HeightDiffLayer'
+        combination_weight: 1.0
+        #   ↑ 参与 static_combination 线性合成时的权重：
+        #     vertex_cost = Σ (combination_weight × 该层 vertex_cost)
+        threshold: 0.1
+        #   ↑ 【可通行性直接相关】相邻顶点高度差超过此值 [m] 即标为**致命**，
+        #     即"台阶/落差超过 0.08 m 的地方不可通行"。调小=更保守（小台阶也挡），
+        #     调大=允许更大落差。注意这**不是**坡度阈值，坡度在建图侧。
+        # 本文件未设置 radius：计算高度差时用的邻域半径（用类默认值）。
+        # 想控制"多大范围内的落差才算台阶"，可以显式加 radius: <m>。
+
+      border:
+        type: 'mesh_layers/BorderLayer'
+        combination_weight: 1.0
+        border_cost: 1.0
+        #   ↑ 赋给网格边界顶点的代价。
+        threshold: 0.2
+        #   ↑ 边界代价超过此值即判致命。当前 1.0 > 0.2 ⇒ **网格边界一律不可通行**，
+        #     作用是防止规划器把车带到地图边缘外。改小 border_cost 会让边缘变可走
+        #     （危险），改大 threshold 则等于关掉这条保护。
+
+      # roughness:
+      #   type: 'mesh_layers/RoughnessLayer'
+      #   combination_weight: 0.3
+      #   threshold: 10.0
+      #   #   ↑ 局部粗糙度超过此值即判致命。粗糙度反映"这块面起伏多大"，
+      #   #     用来挡碎石/不平地面。调小=只走平整面。
+      #   # 同样未设置 radius（计算粗糙度的邻域半径，用类默认值）。
+
+      static_combination:
+        # This layer combines the three input layers by linearly combining vertex costs:
+        # -> vertex_cost = layer1.combination_weight * layer1.vertex_cost + layer2.combination_weight * layer2.vertex_cost + ...
+        # The input layers' lethal vertices are accumulated in a combined set
+        type: 'mesh_layers/AvgCombinationLayer'
+        # The `inputs` parameter determines which layers are processed by this layer.
+        # If a layer does not process inputs, this parameter can be omitted
+        inputs: ['height_diff', 'border']
+        #   ↑ 汇总上面三层的代价（线性加权）与致命顶点（取并集）。
+
+      static_inflation:
+        # 【膨胀层——车体尺寸唯一的入口】
+        type: 'mesh_layers/InflationLayer'
+        inputs: ['static_combination']
+        combination_weight: 1.0
+        inflation_radius: 1.0
+        #   ↑ **外圈**半径 [m]：距离致命顶点超过此值就不再产生任何代价。
+        #     决定"障碍的影响范围有多大"——只影响代价高低，不决定能否通过。
+        inscribed_radius: 0.15
+        #   ↑ **内圈**半径 [m]：贴到致命顶点这么近就取"内圈代价"（见下），
+        #     等价于判死。**这才是决定窄通道能否通过的那个参数**，
+        #     应取车体 footprint 的**内切半径（半宽）**。
+        lethal_value: .inf
+        #   ↑ 致命顶点自身的代价（由输入层传下来的 lethals）。
+        inscribed_value: 1.0
+        #   ↑ 内圈饱和代价。**必须大于 mesh_planner.cost_limit**，否则内圈被当可通行。
+        repulsive_field: false
+        #   ↑ 是否改用"斥力场"式代价分布（远离障碍时代价单调下降的另一套形状）。
+        #     false=指数衰减，一般够用。
+        cost_scaling_factor: 2.2
+        #   ↑ 两圈之间代价的指数衰减速率。实际公式（inflation_layer.cpp）：
+        #       inscribed_radius < d ≤ inflation_radius 时
+        #           cost = inscribed_value × exp(−cost_scaling_factor × (d − inscribed_radius))
+        #       d > inflation_radius 时 cost = 0
+        #     调大 ⇒ 代价随距离下降更快、"怕障碍"的区域更薄（更贴墙走）；
+        #     调小 ⇒ 整片区域都保持较高代价（更居中走）。
+
+      obstacle:
+        # 历史只在内存中；有效观测驱动过期。以下参数修改后重启导航生效。
+        # 回退时把 type 改回 mesh_layers/ObstacleLayer，原插件注册仍保留。
+        type: 'mesh_layers/TemporalObstacleLayer'
+        topic: '/dynamic_obstacles'  # 正常无障碍时也需要有效空帧；断流保持已有代价。
+        # topic: '/cloud_registered'
+        qos: 'Reliable'
+        tf_tolerance: 0.10           # TF 最长等待时间 [s]，等待后再次检查消息年龄。
+        down_axis: [0.0, 0.0, -1.0]
+        axis_frame: 'map'
+        combination_weight: 1.0
+        robot_height: 0.50          # 回波到 mesh 沿投影方向的最大距离 [m]。
+        max_obstacle_dist: 8.0       # 相对真实雷达测量原点的三维标记/清除范围 [m]。
+
+        history_voxel_size: 0.05     # 按三维体素 + 命中面去重，保留真实回波高度 [m]。
+        clearing_mode: 'stvl'       # STVL 时间衰减；视野内没有回波不等于已确认空闲。
+        decay_model: 0             # 0 线性寿命，1 指数衰减，-1 持久保留。
+        obstacle_keep_time: 10.0    # 对应 STVL voxel_decay；线性模式最后检测后保留 10 s。
+        decay_acceleration: 0.0    # 视野加速系数 [1/s²]；箱体遮挡场景先关闭，保留绕行所需历史。
+                                   # 正值启用 STVL a*t³/6 加速，不能代替遮挡/自由空间检测。
+        max_observation_age: 0.30    # 超龄、重复、乱序帧均不修改历史 [s]；超龄日志提示检查上游积压。
+
+        sensor_frame: 'base_link'
+        sensor_offset_xyz: [0.0, 0.0, 0.03]  # 雷达 link 到测量原点的局部偏移 [m]。
+        min_sensor_range: 0.10
+        horizontal_fov_deg: 360.0
+        vertical_fov_min_deg: -7.0
+        vertical_fov_max_deg: 52.0
+
+        localization_reference_frame: 'odom'
+        pose_jump_translation: 0.75   # 定位平移跳变阈值 [m]，工程初值。
+        pose_jump_rotation_deg: 45.0  # 定位旋转跳变阈值 [deg]。
+        pose_jump_max_interval: 0.20  # 相邻雷达位姿跳变检查的最大间隔 [s]。
+
+      #【动态障碍膨胀层】
+      obstacle_inflation:
+        type: 'mesh_layers/InflationLayer' # 输入是 obstacle 层产生的动态障碍顶点。
+        inputs: ['obstacle'] # 只对实时障碍层进行膨胀。
+        combination_weight: 1.0 # 本层参与后续组合时的权重
+        inflation_radius: 0.60 # 动态障碍最多影响到多远，单位 m。
+        inscribed_radius: 0.30 # 动态障碍硬安全距离：车体外接半径约 0.356 m + 约 0.044 m 余量，覆盖转弯时车角。
+        lethal_value: .inf # 障碍本体代价，设置为无穷大
+        inscribed_value: 0.99 # 内圈代价
+        repulsive_field: false # 是否生成斥力向量场
+        cost_scaling_factor: 2.5 # 软膨胀区的代价衰减速度
+
+      final:
+        # 取静态与动态两张代价图里较大的那个，避免动态障碍被静态代价"稀释"。
+        type: 'mesh_layers/MaxCombinationLayer'
+        inputs: ['static_inflation', 'obstacle_inflation']
+
+      # An edge cost equals the total costs that are collected along a
+      # triangle's edge by linearly interpolating the combined vertex costs
+      # This factor defines the factor that is used for the final edge weight
+      # -> edge_weight = edge_length + edge_cost_factor * edge_cost
+      # This edge_weight is then passed to the global planner to search for
+      # the best path
+      # Note: Set this to 0.0 if you need the shortest path
+      edge_cost_factor: 5.0
+      #   ↑ 代价相对几何长度在寻路中的权重：
+      #       edge_weight = edge_length + edge_cost_factor × edge_cost
+      #     0.0 = 纯最短路径（贴着障碍抄近路，可能危险）；
+      #     越大 = 越愿意绕远以避开高代价区域。
+      #     ⚠ 这是"路径形状"的主要旋钮；它不影响能否通过，只影响绕不绕。
+
+      # debug function: enable this, for publishing text markers with edge costs
+      publish_edge_weights_text: false
+      #   ↑ 调试：把每条边的代价以文字 Marker 发出来（RViz 可见）。会明显增加流量。
+
+      # debug/development function: enable this to log the update times of changing layers to a csv file
+      enable_layer_timer: false
+      #   ↑ 调试：把各层更新时间写 CSV，用于定位"哪一层卡住启动/更新"。

@@ -1,0 +1,62 @@
+/**:
+  ros__parameters:
+    pointcloud_sub_topic: "/cloud_registered" #去畸变点云
+    trigger_hero_service_name: "/trigger_hero_relocation" # 服务名
+    decision_reset_topic: "/change_registration_status" # 决策节点发布的状态，用于决策发过来过完起伏路段之后reset
+    pcd_file: "/home/rm/26_Sentry/src/hnurm_perception/PCD/map.pcd"
+    downsampled_pcd_file: "/home/rm/26_Sentry/src/hnurm_perception/PCD/map_down.pcd"
+    # 降采样，减少点云数量，提高配准速度
+    generate_downsampled_pcd: false  # 为true时运行经过一次降采样，为false时需要保证downsampled_pcd_file路径下已经有降采样后的点云文件，最好为false
+
+    init_accumulation_counter : 9              # 初始状态积累点云数量
+    track_accumulation_counter : 3             # 跟踪状态积累点云数量,也是初次配准gicp取的帧数,必须保证track<init
+    reset_accumulation_counter : 5             # 重置状态积累点云数量
+
+    super_qua_accumulation_counter : 10             # 高性能模式quatro积累点云数量
+    super_gicp_accumulation_counter : 8             # 高性能模式gicp积累点云数量
+
+    # 普通跟踪阶段small_gicp 配准参数#################################################################
+    gicp_num_threads: 2                      # 线程数
+    gicp_num_neighbors: 20                   
+    gicp_max_dist_sq: 0.25                    # 距离阈值平方
+    gicp_max_iterations: 50            # 最大迭代次数（默认通常是30-50）
+    ## 收敛阈值
+    gicp_convergence_translation_tolerance: 1e-2    # 平移收敛阈值（单位：m）
+    gicp_convergence_rotation_tolerance: 1e-1       # 旋转收敛阈值（单位：rad
+    
+    tracking_frequency_divisor: 5       # 跟踪阶段每收到几帧进行一次gicp，用于控制gicp频率，控制资源消耗，注意要大于等于1
+
+    gicp_voxel_size: 0.2               # gicp配准下采样
+    quatro_voxel_size: 0.2             # quatro配准下采样
+
+    # 英雄部署模式定位 配准参数#################################################################
+    gicp2_num_threads: 10                             # 线程数
+    gicp2_num_neighbors: 20                   
+    gicp2_max_dist_sq: 0.16                          # 距离阈值平方
+    gicp2_max_iterations: 50                         # 最大迭代次数（默认通常是30-50）
+    gicp2_convergence_translation_tolerance: 1e-4    # 平移收敛阈值（单位：m）
+    gicp2_convergence_rotation_tolerance: 1e-3       # 旋转收敛阈值（单位：rad）
+
+    gicp2_voxel_size: 0.2               # gicp配准下采样
+    quatro2_voxel_size: 0.2            # quatro配准下采样
+
+    #################################################################################################
+
+    map_voxel_size: 0.2                # 全局点云下采样
+
+    init_mode_no_quatro: false        # 是否在初始位姿阶段不使用quatro++，直接用gicp，测试用
+    test_cloud_registered: false        # 是否测试点云回调频率
+    use_rviz_revise: false             # 初始位姿是不是通过rviz手动调整的
+    use_super_individual: true          # 是否使用高性能模式单独定位
+
+    #quatro params
+    m_rotation_max_iter: 200
+    m_num_max_corres: 50
+    m_normal_radius: 0.5 
+    m_fpfh_radius: 0.8 
+    m_distance_threshold: 30.0 
+    m_noise_bound: 0.2 
+    m_rotation_gnc_factor: 1.39 
+    m_rotation_cost_thr: 0.0001 
+    m_estimate_scale: false 
+    m_use_optimized_matching: true

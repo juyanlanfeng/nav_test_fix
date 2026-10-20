@@ -2,7 +2,7 @@
 
 更新：2026-10-11。依据本仓库 `6a45dc4` 及当日读取的源码编写；配套参考包与补丁见 `doc/sim2real_templates/`。
 
-文档位于仓库根目录 `/home/rainple/nav_test`；ROS 2 工作空间为其下的 `mesh_navigation_tutorials`。本文只讨论 MeshNav + MeshController，不涉及其他导航框架。
+文档位于仓库根目录 `/home/rainple/nav_test`；ROS 2 工作空间为其下的 `mesh_nav_ws`。本文只讨论 MeshNav + MeshController，不涉及其他导航框架。
 
 **目标：先证明建图、定位、障碍感知和底盘接口分别正确，再验证全向导航及“旧路可行就不换路”的行为。换用真机可以排除 Gazebo 渲染、仿真时间和接触模型的影响，但不会自动修复地图、向量场或重规划代码的问题。**
 
@@ -24,11 +24,11 @@
 
 ### 0.1 当前清理状态与保留清单
 
-本次检查时，旧顶层 `mesh_navigation/`、完整 STVL 参考仓库和 DDDMR 依赖目录已不在项目中。实际工作空间是 `mesh_navigation_tutorials/`，其 `src/mesh_navigation/` 必须保留。`field/` 和 `field/pcd/rmuc2026_field.pcd` 当前存在；不要继续按此前临时缺失的状态操作。
+本次检查时，旧顶层 `mesh_navigation/`、完整 STVL 参考仓库和 DDDMR 依赖目录已不在项目中。实际工作空间是 `mesh_nav_ws/`，其 `src/mesh_navigation/` 必须保留。`field/` 和 `field/pcd/rmuc2026_field.pcd` 当前存在；不要继续按此前临时缺失的状态操作。
 
 | 路径或内容 | 操作 | 原因 |
 |---|---|---|
-| `mesh_navigation_tutorials/src/` | 保留 | 当前导航、地图、控制、定位和仿真源码 |
+| `mesh_nav_ws/src/` | 保留 | 当前导航、地图、控制、定位和仿真源码 |
 | `src/mesh_navigation/mesh_layers/src/stvl_frustum/` | 保留，含许可证和 `UPSTREAM.md` | 正在编译的三个上游几何文件；不需安装整个 STVL/OpenVDB |
 | `src/pb_vehicle_adapter/`、`src/mesh_navigation_tutorials_sim/`、`src/pb_gazebo_sim_support/` | 保留 | 仿真入口、车辆、场地与插件；协调节点也在 PB 包中 |
 | `third_party/pb2025_sources/`、`pb2025_install/`、`pb2025_build/` | 一起保留 | 已安装 PB 插件是指向 build 内 `.so` 的绝对软链接，不能只删 build |
@@ -40,7 +40,7 @@
 | 工作空间 `build/`、`install/` | 暂时保留；需要时一起停机重建 | 保留可启动基线；迁移到另一台机器则重新编译 |
 | `.git/`、`validation/`、STVL 实施状态文档 | 保留 | 版本与回归证据 |
 
-注意表中的 `src/` 均相对于 `mesh_navigation_tutorials/`。不要用全项目 `find ... -name build` 批量删除；PB 的 build 目录目前是运行依赖。
+注意表中的 `src/` 均相对于 `mesh_nav_ws/`。不要用全项目 `find ... -name build` 批量删除；PB 的 build 目录目前是运行依赖。
 
 ### 0.2 先备份，再处理残留引用
 
@@ -57,8 +57,8 @@ git rev-parse HEAD > "$backup_dir/project_commit.txt"
 tar -czf "$backup_dir/source-and-config.tgz" \
   mesh_navigation_tutorials/src mesh_navigation_tutorials/launch \
   mesh_navigation_tutorials/validation \
-  mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_PLAN.md \
-  mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_STATUS.md \
+  mesh_nav_ws/STVL_MESHNAV_IMPLEMENTATION_PLAN.md \
+  mesh_nav_ws/STVL_MESHNAV_IMPLEMENTATION_STATUS.md \
   tools doc/sim2real_templates SIM2REAL指南.md
 ```
 
@@ -74,7 +74,7 @@ tar -czf "$backup_dir/source-and-config.tgz" \
 
 ```bash
 rg -n 'octo_planner|jie_octomap|dddmr|meshnav_demo_ws' \
-  mesh_navigation_tutorials/src/pb_vehicle_adapter tools third_party \
+  mesh_nav_ws/src/pb_vehicle_adapter tools third_party \
   README.md field/README.md
 ls -l third_party/pb2025_install/rmoss_gz_plugins/plugins/
 test -s field/pcd/rmuc2026_field.pcd
@@ -89,14 +89,14 @@ test -s field/pcd/rmuc2026_field.pcd
 ```bash
 # 终端 A：保留原 PB 仿真入口。
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
+source /home/rainple/nav_test/mesh_nav_ws/install/setup.bash
 ros2 launch pb_vehicle_adapter meshnav_pb_sim.launch.py
 ```
 
 ```bash
 # 终端 B：PCL 仿真差分；先确认当前背景 PCD 与 Gazebo 场地对齐。
 source /opt/ros/humble/setup.bash
-source /home/rainple/nav_test/mesh_navigation_tutorials/install/setup.bash
+source /home/rainple/nav_test/mesh_nav_ws/install/setup.bash
 ros2 launch pcl_obstacle_point_subtraction pcl_obstacle_point_subtraction.launch.py
 ```
 
@@ -212,7 +212,7 @@ ROS 1、ROS 2 普通工作终端分别加载各自环境；只在专门的桥接
 ```bash
 cd /home/rainple/nav_test
 mkdir -p field/real/site01_v1/{raw,calibration,reports,mesh}
-mkdir -p mesh_navigation_tutorials/diagnostics/real_site01
+mkdir -p mesh_nav_ws/diagnostics/real_site01
 ```
 
 保存软件 commit、驱动配置、FAST-LIVO2 YAML、相机标定和整车传感器外参。后续更换外参、地图坐标或重建地图时使用新的版本目录。
@@ -576,7 +576,7 @@ PCL 的 `distance_threshold` 是与背景最近邻的距离容差，不是世界
 
 本实现借用了三个 STVL 视锥文件和时间衰减公式，仍采用 MeshNav 的三维体素/命中面记录、顶点投影与事件更新。没有引入 OpenVDB，也没有完整 STVL 观测缓冲、独立更新周期或自由空间/遮挡判定。视锥内缺少回波不能证明物体已移走。
 
-2026-10-09 的原箱体场景修复后有一轮成功到达，但行驶约 **39.8 m、重规划 5 次**。这是有限场景验证，尚不能证明所有复杂场景的路线效率或稳定性；实车前继续保留同场景回归。记录见 [实施状态](mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_STATUS.md) 与 `mesh_navigation_tutorials/validation/stvl_box_20261009/`。
+2026-10-09 的原箱体场景修复后有一轮成功到达，但行驶约 **39.8 m、重规划 5 次**。这是有限场景验证，尚不能证明所有复杂场景的路线效率或稳定性；实车前继续保留同场景回归。记录见 [实施状态](mesh_nav_ws/STVL_MESHNAV_IMPLEMENTATION_STATUS.md) 与 `mesh_nav_ws/validation/stvl_box_20261009/`。
 
 ## 8. 在电脑上完成改造，再部署标准接口
 
@@ -591,7 +591,7 @@ nav_test/                                      # 源码仓库；机器人上的�
 │   ├── patches/pcl_real_interfaces.patch
 │   ├── meshnav_runtime/                        # 协调节点 + 显式使能的命令网关
 │   └── meshnav_real_bringup/                   # 配置校验、纯导航启动、假硬件检查
-└── mesh_navigation_tutorials/
+└── mesh_nav_ws/
     ├── src/meshnav_runtime/                    # 执行暂存后产生
     ├── src/meshnav_real_bringup/                # 执行暂存后产生
     ├── build-real/                             # 与原仿真 build 分开
@@ -615,11 +615,11 @@ nav_test/                                      # 源码仓库；机器人上的�
 
 ### 8.2 备份与暂存改造
 
-以下按电脑仓库 `~/nav_test` 演示；机器人仓库则是 `~/nav_test_fix`。`REPO` 指包含本指南的仓库根目录，`WS` 指其下的 **mesh_navigation_tutorials**，注意复数和两个层级。每个操作终端先设置：
+以下按电脑仓库 `~/nav_test` 演示；机器人仓库则是 `~/nav_test_fix`。`REPO` 指包含本指南的仓库根目录，`WS` 指其下的 **mesh_nav_ws**，注意两个目录层级。每个操作终端先设置：
 
 ```bash
 export REPO="$HOME/nav_test"
-export WS="$REPO/mesh_navigation_tutorials"
+export WS="$REPO/mesh_nav_ws"
 export BUNDLE="$HOME/meshnav_bundles/site01_v1"
 cd "$REPO"
 test -f SIM2REAL指南.md
@@ -639,7 +639,7 @@ python3 doc/sim2real_templates/tools/stage_reference.py --repo "$REPO"
 ```bash
 python3 doc/sim2real_templates/tools/stage_reference.py --repo "$REPO" --apply
 git diff --stat
-git diff -- mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp
+git diff -- mesh_nav_ws/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp
 ```
 
 本步骤的具体结果：
@@ -664,7 +664,7 @@ env -u AMENT_PREFIX_PATH -u CMAKE_PREFIX_PATH -u COLCON_PREFIX_PATH \
     bash --noprofile --norc
 source /opt/ros/humble/setup.bash
 export REPO="$HOME/nav_test"
-export WS="$REPO/mesh_navigation_tutorials"
+export WS="$REPO/mesh_nav_ws"
 cd "$WS"
 sudo apt-get check
 dpkg --audit
@@ -1243,19 +1243,19 @@ ros2 bag record --include-hidden-topics -o "$REAL_RUN_DIR/bag" \
 - [点云转换流程及限制](field/README.md)
 - [PCD 转换器](field/pcd_to_nav_mesh.py)
 - [几何预检工具](field/check_nav_mesh_route.py)
-- [当前导航参数](mesh_navigation_tutorials/src/mesh_navigation_tutorials/config/mbf_mesh_nav.yaml)
-- [PB 仿真入口](mesh_navigation_tutorials/src/pb_vehicle_adapter/launch/meshnav_pb_sim.launch.py)
-- [PB 仿真资源与插件路径](mesh_navigation_tutorials/src/pb_vehicle_adapter/config/pb_vehicle_profile.yaml)
-- [PCL 仿真参数](mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/config/pcl_obstacle_point_subtraction.yaml)
-- [PCL 参数文件入口](mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/launch/pcl_obstacle_point_subtraction.launch.py)
-- [PCL 差分与仿真原点修正](mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp)
-- [PCL TF 发布开关](mesh_navigation_tutorials/src/pcl_obstacle_point_subtraction/src/cloud_tf_publisher.cpp)
-- [RMCL 启动入口](mesh_navigation_tutorials/src/mesh_navigation_tutorials/launch/rmcl_launch.py)
-- [点云转换器源码](mesh_navigation_tutorials/src/rmcl/rmcl_ros/src/nodes/conversion/pc2_to_o1dn.cpp)
-- [障碍投影源码](mesh_navigation_tutorials/src/mesh_navigation/mesh_layers/src/obstacle_layer.cpp)
-- [时间衰减与历史源码](mesh_navigation_tutorials/src/mesh_navigation/mesh_layers/src/temporal_obstacle_layer.cpp)
-- [三个上游文件的来源、许可证与适配差异](mesh_navigation_tutorials/src/mesh_navigation/mesh_layers/src/stvl_frustum/UPSTREAM.md)
-- [STVL 实施、测试与箱体绕行结果](mesh_navigation_tutorials/STVL_MESHNAV_IMPLEMENTATION_STATUS.md)
-- [MBF 原始 TwistStamped 发布](mesh_navigation_tutorials/src/move_base_flex/mbf_abstract_nav/src/abstract_navigation_server.cpp)
-- [重规划协调节点](mesh_navigation_tutorials/src/pb_vehicle_adapter/pb_vehicle_adapter/meshnav_navigator.py)
-- [路线检查服务](mesh_navigation_tutorials/src/mesh_navigation/mbf_mesh_nav/src/mesh_navigation_server.cpp)
+- [当前导航参数](mesh_nav_ws/src/mesh_navigation_tutorials/config/mbf_mesh_nav.yaml)
+- [PB 仿真入口](mesh_nav_ws/src/pb_vehicle_adapter/launch/meshnav_pb_sim.launch.py)
+- [PB 仿真资源与插件路径](mesh_nav_ws/src/pb_vehicle_adapter/config/pb_vehicle_profile.yaml)
+- [PCL 仿真参数](mesh_nav_ws/src/pcl_obstacle_point_subtraction/config/pcl_obstacle_point_subtraction.yaml)
+- [PCL 参数文件入口](mesh_nav_ws/src/pcl_obstacle_point_subtraction/launch/pcl_obstacle_point_subtraction.launch.py)
+- [PCL 差分与仿真原点修正](mesh_nav_ws/src/pcl_obstacle_point_subtraction/src/pcl_obstacle_point_subtraction.cpp)
+- [PCL TF 发布开关](mesh_nav_ws/src/pcl_obstacle_point_subtraction/src/cloud_tf_publisher.cpp)
+- [RMCL 启动入口](mesh_nav_ws/src/mesh_navigation_tutorials/launch/rmcl_launch.py)
+- [点云转换器源码](mesh_nav_ws/src/rmcl/rmcl_ros/src/nodes/conversion/pc2_to_o1dn.cpp)
+- [障碍投影源码](mesh_nav_ws/src/mesh_navigation/mesh_layers/src/obstacle_layer.cpp)
+- [时间衰减与历史源码](mesh_nav_ws/src/mesh_navigation/mesh_layers/src/temporal_obstacle_layer.cpp)
+- [三个上游文件的来源、许可证与适配差异](mesh_nav_ws/src/mesh_navigation/mesh_layers/src/stvl_frustum/UPSTREAM.md)
+- [STVL 实施、测试与箱体绕行结果](mesh_nav_ws/STVL_MESHNAV_IMPLEMENTATION_STATUS.md)
+- [MBF 原始 TwistStamped 发布](mesh_nav_ws/src/move_base_flex/mbf_abstract_nav/src/abstract_navigation_server.cpp)
+- [重规划协调节点](mesh_nav_ws/src/pb_vehicle_adapter/pb_vehicle_adapter/meshnav_navigator.py)
+- [路线检查服务](mesh_nav_ws/src/mesh_navigation/mbf_mesh_nav/src/mesh_navigation_server.cpp)

@@ -1,6 +1,6 @@
 {
-    "cmake.sourceDirectory": "${workspaceFolder}/mesh_navigation_tutorials/src/mesh_navigation/mesh_layers",
-    "cmake.buildDirectory": "${workspaceFolder}/mesh_navigation_tutorials/build/mesh_layers",
+    "cmake.sourceDirectory": "${workspaceFolder}/mesh_nav_ws/src/mesh_navigation/mesh_layers",
+    "cmake.buildDirectory": "${workspaceFolder}/mesh_nav_ws/build/mesh_layers",
     "cmake.configureOnOpen": false,
     "ROS2.distro": "humble",
     "python.autoComplete.extraPaths": [

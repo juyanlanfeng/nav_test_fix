@@ -3,10 +3,10 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/mesh_navigation_tutorials/src/mesh_navigation/mesh_layers/include",
-                "${workspaceFolder}/mesh_navigation_tutorials/src/mesh_navigation/mesh_map/include",
-                "${workspaceFolder}/mesh_navigation_tutorials/install/lvr2/include",
-                "${workspaceFolder}/mesh_navigation_tutorials/install/**",
+                "${workspaceFolder}/mesh_nav_ws/src/mesh_navigation/mesh_layers/include",
+                "${workspaceFolder}/mesh_nav_ws/src/mesh_navigation/mesh_map/include",
+                "${workspaceFolder}/mesh_nav_ws/install/lvr2/include",
+                "${workspaceFolder}/mesh_nav_ws/install/**",
                 "${workspaceFolder}/**",
                 "/opt/ros/humble/include/**",
                 "/usr/include/pcl-1.12",
@@ -14,7 +14,7 @@
                 "/usr/include/hdf5/serial",
                 "/usr/include/opencv4"
             ],
-            "compileCommands": "${workspaceFolder}/mesh_navigation_tutorials/build/compile_commands.json",
+            "compileCommands": "${workspaceFolder}/mesh_nav_ws/build/compile_commands.json",
             "defines": [],
             "compilerPath": "/usr/bin/g++-13",
             "cStandard": "gnu17",
