@@ -104,23 +104,25 @@ public:
         }
 
         try {
-            // 目标系在前、源系在后；使用点云消息中的采样时间查询。
+            // 目标系在前、源系在后；使用最新可用变换，避免点云 stamp 比 odom->base 新时反复超时。
             odom_to_map_ = tf_buffer_->lookupTransform(
                 map_frame_, odom_frame_, rclcpp::Time(0), rclcpp::Duration::from_seconds(0.05)
               );
         }
         catch(const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "未查找到TF信息%s -> %s", odom_frame_.c_str(), map_frame_.c_str());
+            RCLCPP_WARN(this->get_logger(), "未查找到TF信息: %s <- %s (map <- camera_init): %s",
+                        map_frame_.c_str(), odom_frame_.c_str(), e.what());
             return;
         }
         try {
-            // 目标系在前、源系在后；使用点云消息中的采样时间查询。
+            // 目标系在前、源系在后；使用最新可用变换，避免 odom->base_link 比点云 stamp 旧。
             map_to_base_ = tf_buffer_->lookupTransform(
                 base_frame_, map_frame_, rclcpp::Time(0), rclcpp::Duration::from_seconds(0.05)
               );
         }
         catch(const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "未查找到TF信息%s -> %s", odom_frame_.c_str(), map_frame_.c_str());
+            RCLCPP_WARN(this->get_logger(), "未查找到TF信息: %s <- %s (base_footprint <- map): %s",
+                        base_frame_.c_str(), map_frame_.c_str(), e.what());
             return;
         }
 

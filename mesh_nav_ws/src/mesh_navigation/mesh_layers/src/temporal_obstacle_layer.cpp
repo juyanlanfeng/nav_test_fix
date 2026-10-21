@@ -220,10 +220,14 @@ void TemporalObstacleLayer::processPointCloud(const sensor_msgs::msg::PointCloud
   Eigen::Isometry3d cloud_from_lidar, map_from_reference;
   try
   {
+    // Latest TF, not the cloud stamp: odom->base_link is 10 Hz and is published just
+    // before the cloud, so a stamped lookup asks for the future and waits/times out
+    // inside this single-threaded callback. This also avoids dropping frames when the
+    // buffer has no sample exactly at the cloud stamp.
     const auto sensor_tf = map->tf2Buffer().lookupTransform(
-      msg->header.frame_id, sensor_frame_, msg->header.stamp, config_.tf_tolerance);
+      msg->header.frame_id, sensor_frame_, rclcpp::Time(0), config_.tf_tolerance);
     const auto reference_tf = map->tf2Buffer().lookupTransform(
-      map->mapFrame(), reference_frame_, msg->header.stamp, config_.tf_tolerance);
+      map->mapFrame(), reference_frame_, rclcpp::Time(0), config_.tf_tolerance);
     if (!transformToEigen(sensor_tf.transform, cloud_from_lidar) ||
         !transformToEigen(reference_tf.transform, map_from_reference)) return;
   }

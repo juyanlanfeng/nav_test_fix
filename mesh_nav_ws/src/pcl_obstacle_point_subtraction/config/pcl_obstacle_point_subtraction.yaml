@@ -8,50 +8,51 @@
     # 使用 Gazebo 的 /clock；实车或没有 /clock 的独立运行设为 false。
 
     base_frame: 'base_footprint'
-    # 车体参考坐标系；通常应与输入里程计的 child_frame_id 一致。
+    # 车体参考系；与 MBF 的 robot_frame、速度适配器的 base_frame 一致。
 
-    lidar_frame: 'base_link'
-    # 单帧雷达点云的坐标系，必须与输入点云的 header.frame_id 一致。
+    lidar_frame: 'lidar_link'
+    # 雷达 link。实车 base_footprint→lidar_link = [-0.03, 0.077, 0.0601]（tf_transformer 发布）。
+    # 注意：/cloud_registered 的 frame 是 camera_init，PCL 用 odom_frame 做比较；
+    # 本参数只供可选的 cloud_tf_publisher 静态 TF 使用。
 
 obstacle_sub:
   ros__parameters:
     # --- 点云输入与输出 ---
     input_cloud_topic: '/cloud_registered'
-    # 去畸变后的单帧 sensor_msgs/PointCloud2；点坐标属于 lidar_frame。
+    # 去畸变后的单帧 sensor_msgs/PointCloud2；点坐标属于 camera_init（FAST-LIVO2 世界系），
+    # 不是 lidar_frame。PCL 会按 map<-camera_init 变到 map 后与背景差分。
 
     output_cloud_topic: '/dynamic_obstacles'
     # 背景差分后变换回 base_frame 的障碍点云，保留原始采样时间。
 
     # --- 固定背景与差分 ---
-    pcd_file_path: '/home/rm/26_Sentry/src/hnurm_perception/PCD/map.pcd'
-    # 当前 Gazebo 场地的静态背景 PCD，采用绝对路径；更换设备或地图时修改此项。
-    # 背景点坐标必须已与 odom_frame 对齐，单纯修改坐标系名称不会进行地图配准。
+    pcd_file_path: '/home/rm/nav_test_fix/mesh_nav_ws/maps/PCD/map_with_ground.pcd'
+    # 实车静态背景 PCD；与 registration、NavMesh 使用同一张 map_with_ground 地图。
 
     distance_threshold: 0.08
     # 背景匹配距离容差 [m]；扫描点距最近背景点大于此值时保留为差异点。
     # 代码传入 PCL 最近邻差分算法时会平方；此处填写实际距离，不填写距离平方。
     odom_frame: 'camera_init'
+    # /cloud_registered 的坐标系（FAST-LIVO2 世界系）。实车 TF 中 odom→camera_init 为静态单位变换。
     map_frame: 'map'
+    # registration 的定位地图坐标系；与 NavMesh / 背景 PCD 一致。
 
 cloud_tf_publisher:
   ros__parameters:
     # --- 里程计输入 ---
-    odom_topic: '/Odometry_transformed'
-    # nav_msgs/Odometry 输入；按消息的父子坐标系、测量时间和 pose 广播动态 TF。
-    # 里程计应与背景使用同一参考坐标，并为共享 base_frame 提供位姿。
+    odom_topic: '/Odometry'
+    # 实车 FAST-LIVO2 的 /Odometry（Reliable）。
+    # need_odom_tf=false 时不发布 TF；实车 TF 统一由 tf_transformer/FAST-LIVO2 发布。
 
-    # 仿真下不需要静态tf
+    # 实车 TF 由 tf_transformer 统一发布，保持 false，避免重复。
     need_static_tf: false
-    # 仿真也不需要动态tf
     need_odom_tf: false
 
     # --- base_frame -> lidar_frame 的固定安装外参 ---
-    lidar_xyz: [0.10, 0.0, 0.216]
-    # 雷达测量原点在 base_frame 中的位置 [x, y, z]，单位 [m]。
-    # 当前 SDF 的 Z = 0.076（chassis）+ 0.11（雷达 link）+ 0.03（测量原点）。
-    # /cloud 原始 XYZ 以测量原点为基准，所以这里包含额外的 0.03 m。
-    # URDF 同名 link 原点为 0.186 m；此节点应独立维护雷达 TF，避免重复发布。
+    lidar_xyz: [-0.03, 0.077, 0.0601]
+    # 实测 base_footprint→lidar_link，来源：
+    # 26_Sentry/src/hnurm_bringup/params/extrinsic.yaml: lidar_to_base。
+    # need_static_tf=false 时不使用；打开时也不应与 tf_transformer 同时发布。
 
     lidar_rpy: [0.0, 0.0, 0.0]
-    # 雷达相对 base_frame 的安装角 [roll, pitch, yaw]，单位 [rad]。
-    # 当前仿真没有安装旋转；实车填写标定值。XYZ/RPY 数组均须包含 3 个浮点数。
+    # 实测安装角为 0；如标定有 roll/pitch/yaw，填在这里。

@@ -44,8 +44,7 @@
 # 仅供启动文件读取的导航选项；meshnav_launch 不是 ROS 节点。
 meshnav_launch:
   ros__parameters:
-    map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
-    map_name: 'scanned_maps'       # RMCL 地图名；对应 maps/<名称>.ply。
+    map_name: 'map_with_ground'       # RMCL 地图名；对应 maps/<名称>.ply。
     start_rviz: 'True'               # 是否打开导航 RViz。
     meshnav_rviz_config: 'pb_meshnav.rviz'  # PB 导航 RViz 配置文件，位于 pb_vehicle_adapter/rviz。
 
@@ -68,12 +67,12 @@ move_base_flex:
     global_frame: 'map'          # 全局坐标系。RViz 点的目标坐标就在这个系里；
                                  # 换掉它，所有目标坐标的含义都会跟着变。
     robot_frame: 'base_footprint'  # 车体坐标系（贴地投影）。规划器用它查询机器人位姿。
-    # 来自TfTransformer，后面需要单独启动
-    odom_topic: '/Odometry'           # 里程计话题；MBF 由它拿机器人速度（速度长期为 0 会
-                                 # 触发下面的 cmd_vel_ignored_tolerance）。
+    odom_frame: 'odom'             # 连续里程计坐标系；实车 TF: map→odom→base_link→base_footprint。
+    # 实车 FAST-LIVO2 发布 /Odometry（Reliable）。MBF 只用它取速度，位姿由 TF 提供。
+    odom_topic: '/Odometry'        # 里程计话题；速度长期为 0 会触发 cmd_vel_ignored_tolerance。
 
     # ---- 时间与到达前后行为 -------------------------------------------------
-    use_sim_time: true           # 仿真：时间来自 /clock。真机必须为 false。
+    use_sim_time: false          # 实车使用系统时间；仿真才需要 /clock。
     force_stop_at_goal: true     # 到达后由 MBF 发零速度。注意：**零速度不等于有制动力**，
                                  # 力控底盘在零指令下仍会滑（本项目实测驻停漂移 1.77 m），
                                  # 需要独立的保持层来接管。
@@ -123,8 +122,10 @@ move_base_flex:
                                  # 调小能更快失败退出，但治标不治本。
 
     mesh_map:
+      global_frame: 'map'
+      #   ↑ 网格、路径、代价使用的坐标系；必须与 move_base_flex.global_frame 一致。
       # ---- 输入与缓存 -------------------------------------------------------
-      mesh_file: '/home/rm/nav_test_fix/mesh_nav_ws/maps/ply/only_ubuntu.ply'
+      mesh_file: '/home/rm/nav_test_fix/mesh_nav_ws/maps/ply/map_with_ground.ply'
       #   ↑ 可通行曲面（三角形网格）的输入路径；通用教程入口可传 mesh_map_path 覆盖。
       mesh_part: '/'
       #   ↑ 在 HDF5/PLY 里的根部分组名。PLY 用 '/' 表示根。
@@ -196,7 +197,7 @@ move_base_flex:
         type: 'mesh_layers/InflationLayer'
         inputs: ['static_combination']
         combination_weight: 1.0
-        inflation_radius: 1.0
+        inflation_radius: 0.8
         #   ↑ **外圈**半径 [m]：距离致命顶点超过此值就不再产生任何代价。
         #     决定"障碍的影响范围有多大"——只影响代价高低，不决定能否通过。
         inscribed_radius: 0.15
@@ -240,8 +241,10 @@ move_base_flex:
                                    # 正值启用 STVL a*t³/6 加速，不能代替遮挡/自由空间检测。
         max_observation_age: 0.30    # 超龄、重复、乱序帧均不修改历史 [s]；超龄日志提示检查上游积压。
 
-        sensor_frame: 'base_link'
-        sensor_offset_xyz: [0.0, 0.0, 0.03]  # 雷达 link 到测量原点的局部偏移 [m]。
+        # 实车：base_footprint→lidar_link 由 tf_transformer 按实测外参发布
+        # (-0.03, 0.077, 0.0601)，TF 已经描述测量原点，这里不再叠加仿真 +0.03 m。
+        sensor_frame: 'lidar_link'
+        sensor_offset_xyz: [0.0, 0.0, 0.0]  # 雷达 link 到测量原点的局部偏移 [m]。
         min_sensor_range: 0.10
         horizontal_fov_deg: 360.0
         vertical_fov_min_deg: -7.0
@@ -262,7 +265,7 @@ move_base_flex:
         lethal_value: .inf # 障碍本体代价，设置为无穷大
         inscribed_value: 0.99 # 内圈代价
         repulsive_field: false # 是否生成斥力向量场
-        cost_scaling_factor: 2.5 # 软膨胀区的代价衰减速度
+        cost_scaling_factor: 2.8 # 软膨胀区的代价衰减速度
 
       final:
         # 取静态与动态两张代价图里较大的那个，避免动态障碍被静态代价"稀释"。

@@ -37,7 +37,8 @@ move_base_flex:
     use_sim_time: false
     global_frame: map
     robot_frame: base_footprint            # 与上面的 base_frame 一致。
-    odom_topic: /Odometry                      # 外部提供 nav_msgs/Odometry，含实际运动速度。
+    odom_frame: odom                       # 实车 TF: map→odom→base_link→base_footprint。
+    odom_topic: /Odometry                  # FAST-LIVO2 发布，Reliable；MBF 只取速度，位姿走 TF。
     force_stop_at_goal: true
 
 # 由 RViz 启动代码读取并转换为话题 remapping；不启动传感器或 URDF 发布器。

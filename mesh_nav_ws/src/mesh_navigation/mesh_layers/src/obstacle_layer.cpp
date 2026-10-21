@@ -243,10 +243,15 @@ bool ObstacleLayer::projectObservations(
   Eigen::Isometry3d map_from_axis;
   try
   {
+    // Use the latest available transforms. The cloud stamp is produced after the
+    // 10 Hz odom->base_link update; asking for a transform in the future inside this
+    // single-threaded callback blocks the TF listener and then times out, producing
+    // "extrapolation into the future" skips. Latest TF is a few ms/one odom period
+    // old and keeps the obstacle pipeline alive.
     const auto cloud_tf = map->tf2Buffer().lookupTransform(
-      map->mapFrame(), msg.header.frame_id, msg.header.stamp, config_.tf_tolerance);
+      map->mapFrame(), msg.header.frame_id, rclcpp::Time(0), config_.tf_tolerance);
     const auto axis_tf = map->tf2Buffer().lookupTransform(
-      map->mapFrame(), config_.axis_frame_id, msg.header.stamp, config_.tf_tolerance);
+      map->mapFrame(), config_.axis_frame_id, rclcpp::Time(0), config_.tf_tolerance);
     if (!transformToEigen(cloud_tf.transform, output.map_from_cloud) ||
         !transformToEigen(axis_tf.transform, map_from_axis)) return false;
   }

@@ -13,14 +13,14 @@ install(DIRECTORY config launch rviz
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/meshnav_plan_only.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME meshnav_plan_only
-)
-install(PROGRAMS scripts/meshnav_source_cloud.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME meshnav_source_cloud
-)
+# install(PROGRAMS scripts/meshnav_plan_only.py
+#   DESTINATION lib/${PROJECT_NAME}
+#   RENAME meshnav_plan_only
+# )
+# install(PROGRAMS scripts/meshnav_source_cloud.py
+#   DESTINATION lib/${PROJECT_NAME}
+#   RENAME meshnav_source_cloud
+# )
 
 # test
 if(BUILD_TESTING)

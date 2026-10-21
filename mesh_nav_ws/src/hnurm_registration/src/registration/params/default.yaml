@@ -3,8 +3,8 @@
     pointcloud_sub_topic: "/cloud_registered" #去畸变点云
     trigger_hero_service_name: "/trigger_hero_relocation" # 服务名
     decision_reset_topic: "/change_registration_status" # 决策节点发布的状态，用于决策发过来过完起伏路段之后reset
-    pcd_file: "/home/rm/26_Sentry/src/hnurm_perception/PCD/map.pcd"
-    downsampled_pcd_file: "/home/rm/26_Sentry/src/hnurm_perception/PCD/map_down.pcd"
+    pcd_file: "/home/rm/nav_test_fix/mesh_nav_ws/maps/PCD/map_with_ground.pcd"
+    downsampled_pcd_file: "/home/rm/nav_test_fix/mesh_nav_ws/maps/PCD/map_with_ground_downsampled.pcd"
     # 降采样，减少点云数量，提高配准速度
     generate_downsampled_pcd: false  # 为true时运行经过一次降采样，为false时需要保证downsampled_pcd_file路径下已经有降采样后的点云文件，最好为false
 
